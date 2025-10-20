@@ -1,0 +1,77 @@
+# Arquivos e pastas de Build do CMake
+build/
+**/build/
+*.cmake.user
+lib/
+**/lib/
+
+# Arquivos gerados pelo CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+
+# Arquivos de saída da compilação (executáveis, bibliotecas, etc.)
+*.elf
+*.hex
+*.uf2
+*.bin
+*.map
+*.dis
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.pdb
+*.exe
+
+# Arquivos gerados pelo PIOASM (o .pio é o fonte, o .h é gerado)
+*.pio.h
+
+# Arquivos específicos do VSCode
+.vscode/
+*.code-workspace
+
+# Arquivos de sistema operacional
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Arquivos de log
+*.log
+
+# Arquivos de backup de editores comuns
+*~
+*.swp
+*.swo
+*.bak
+
+# Outros arquivos temporários ou específicos de ferramentas
+.cproject
+.project
+.settings/
+tags
+.tags_sorted_by_file
+.tags_sorted_by_name
+
+# Se você usar Python para scripts auxiliares e criar um ambiente virtual
+venv/
+*.pyc
+__pycache__/
+.env
+
+# Arquivos específicos do Windows (se aplicável)
+*.[Cc][Pp][Ll]
+*.sublime-*
+
+# Arquivos específicos do macOS (se aplicável)
+._*
+
+# Documentação gerada (ex: Doxygen)
+html/
+latex/
