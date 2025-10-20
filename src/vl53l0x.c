@@ -48,11 +48,13 @@ static uint16_t read_reg16(vl53l0x_dev *dev, uint8_t reg)
 
 // --- Funções Públicas ---
 
-bool vl53l0x_init(vl53l0x_dev *dev, i2c_inst_t *i2c_port)
-{
+//---------------------------------------------------------------------------------------------//
+// vl53l0x.c -> Substitua a função vl53l0x_init por esta versão completa
+//---------------------------------------------------------------------------------------------//
+bool vl53l0x_init(vl53l0x_dev* dev, i2c_inst_t* i2c_port) {
     dev->i2c = i2c_port;
     dev->address = VL53L0X_ADDRESS;
-    dev->io_timeout = 1000; // Timeout de 1 segundo para operações.
+    dev->io_timeout = 500; // Timeout de 500ms é suficiente para operações.
 
     // A sequência abaixo é uma implementação complexa e específica do VL53L0X,
     // necessária para calibrar e configurar corretamente o sensor.
@@ -73,46 +75,57 @@ bool vl53l0x_init(vl53l0x_dev *dev, i2c_inst_t *i2c_port)
     write_reg(dev, SYSTEM_SEQUENCE_CONFIG, 0xFF);
 
     // Calibração de SPAD (Single Photon Avalanche Diode).
-    write_reg(dev, POWER_MANAGEMENT_GO1_POWER_FORCE, 0x01);
-    write_reg(dev, 0xFF, 0x01);
-    write_reg(dev, SYSRANGE_START, 0x00);
-    write_reg(dev, 0xFF, 0x06);
+    write_reg(dev, POWER_MANAGEMENT_GO1_POWER_FORCE, 0x01); write_reg(dev, 0xFF, 0x01);
+    write_reg(dev, SYSRANGE_START, 0x00); write_reg(dev, 0xFF, 0x06);
     write_reg(dev, 0x83, read_reg(dev, 0x83) | 0x04);
-    write_reg(dev, 0xFF, 0x07);
-    write_reg(dev, 0x81, 0x01);
-    write_reg(dev, POWER_MANAGEMENT_GO1_POWER_FORCE, 0x01);
-    write_reg(dev, 0x94, 0x6b);
+    write_reg(dev, 0xFF, 0x07); write_reg(dev, 0x81, 0x01);
+    write_reg(dev, POWER_MANAGEMENT_GO1_POWER_FORCE, 0x01); write_reg(dev, 0x94, 0x6b);
     write_reg(dev, 0x83, 0x00);
-
+    
+    // Laço de espera RTOS-friendly
     TickType_t start_ticks = xTaskGetTickCount();
-    while (read_reg(dev, 0x83) == 0x00)
-    {
-        if ((xTaskGetTickCount() - start_ticks) > pdMS_TO_TICKS(dev->io_timeout))
-            return false;
-        vTaskDelay(pdMS_TO_TICKS(1)); // Cede tempo para outras tarefas
+    while (read_reg(dev, 0x83) == 0x00) {
+        if ((xTaskGetTickCount() - start_ticks) > pdMS_TO_TICKS(dev->io_timeout)) return false;
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
-
+    
     write_reg(dev, 0x83, 0x01);
     read_reg(dev, 0x92);
-    write_reg(dev, 0x81, 0x00);
-    write_reg(dev, 0xFF, 0x06);
+    write_reg(dev, 0x81, 0x00); write_reg(dev, 0xFF, 0x06);
     write_reg(dev, 0x83, read_reg(dev, 0x83) & ~0x04);
-    write_reg(dev, 0xFF, 0x01);
-    write_reg(dev, SYSRANGE_START, 0x01);
-    write_reg(dev, 0xFF, 0x00);
-    write_reg(dev, POWER_MANAGEMENT_GO1_POWER_FORCE, 0x00);
+    write_reg(dev, 0xFF, 0x01); write_reg(dev, SYSRANGE_START, 0x01);
+    write_reg(dev, 0xFF, 0x00); write_reg(dev, POWER_MANAGEMENT_GO1_POWER_FORCE, 0x00);
 
     // Configuração da interrupção (não usada ativamente, mas parte da sequência).
     write_reg(dev, SYSTEM_INTERRUPT_CONFIG_GPIO, 0x04);
     write_reg(dev, GPIO_HV_MUX_ACTIVE_HIGH, read_reg(dev, GPIO_HV_MUX_ACTIVE_HIGH) & ~0x10);
     write_reg(dev, SYSTEM_INTERRUPT_CLEAR, 0x01);
 
-    // Configuração do timing budget (orçamento de tempo por medição).
-    dev->measurement_timing_budget_us = 33000; // 33ms é um bom valor padrão.
-    write_reg(dev, SYSTEM_SEQUENCE_CONFIG, 0xE8);
-    write_reg16(dev, 0x04, 33000 / 1085); // Valor de aproximação para o período.
+    // --- CORREÇÃO DE ROBUSTEZ: AUMENTAR O TIMING BUDGET ---
+    // Aumenta o tempo de medição para tornar o sensor mais estável em fontes de
+    // alimentação mais fracas (como baterias), reduzindo picos de corrente.
+    // O padrão é 33ms. Usaremos 200ms para máxima estabilidade.
+    dev->measurement_timing_budget_us = 200000; // 200ms
 
+    uint32_t budget_us = dev->measurement_timing_budget_us;
+    if (budget_us < 20000) return false; // Orçamento mínimo é 20ms
+
+    // Sequência baseada na API da ST para configurar o timing budget
+    // 1. Desabilita a sequência para poder reconfigurar
+    write_reg(dev, SYSTEM_SEQUENCE_CONFIG, 0xFF);
+    
+    // 2. Calcula e escreve o timeout para o "final range"
+    // A fórmula vem do datasheet e da API da ST
+    uint32_t final_range_timeout_us = budget_us - 1320;
+    uint16_t final_range_timeout_mclks = final_range_timeout_us / 1085;
+    write_reg16(dev, FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI, final_range_timeout_mclks);
+    
+    // 3. Habilita a sequência de "final range"
+    write_reg(dev, SYSTEM_SEQUENCE_CONFIG, 0xE8);
+
+    // Limpa qualquer flag de interrupção pendente antes de começar
     write_reg(dev, SYSTEM_INTERRUPT_CLEAR, 0x01);
+    
     return true;
 }
 

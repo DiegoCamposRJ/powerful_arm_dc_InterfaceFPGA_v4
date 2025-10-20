@@ -24,9 +24,9 @@ int main() {
     stdio_init_all();
     sleep_ms(2000);
     // Aguarda em um loop até que a conexão USB seja estabelecida com o computador.
-    while (!stdio_usb_connected()) {
-        sleep_ms(200);
-    }
+    // while (!stdio_usb_connected()) {
+    //     sleep_ms(200);
+    // }
 
     init_perifericos();
     buzzer_pwm_init();
@@ -34,7 +34,7 @@ int main() {
     // --- CORREÇÃO AQUI ---
     // Cria um semáforo de contagem que pode "segurar" até 2 permissões.
     // Começa com 0 permissões disponíveis.
-    self_test_sem = xSemaphoreCreateCounting(3, 0); // maxCount = 2, initialCount = 0
+    self_test_sem = xSemaphoreCreateCounting(2, 0); // maxCount = 2, initialCount = 0
 
     i2c0_mutex = xSemaphoreCreateMutex();
     sensor_data_mutex = xSemaphoreCreateMutex();
@@ -48,8 +48,8 @@ int main() {
 
     xTaskCreate(task_self_test, "Self-Test Task", 2048, NULL, 1, &handle_self_test);
     
-    xTaskCreate(task_alerta_proximidade, "Alerta Prox", 512, NULL, 2, &handle_alerta_proximidade);
-    xTaskCreate(task_distancia_display, "Distancia Display", 2048, NULL, 1, &handle_distancia_display);
+    xTaskCreate(task_alerta_proximidade, "Alerta Prox", 512, NULL, 3, &handle_alerta_proximidade);
+    xTaskCreate(task_distancia_display, "Distancia Display", 2048, NULL, 2, &handle_distancia_display);
 
     vTaskStartScheduler();
 

@@ -253,12 +253,18 @@ void task_distancia_display(void *params) {
     
 
 //---------------------------------------------------------------------------------------------//
-// Tarefa de Leitura do Sensor VL53L0X e Exibição no OLED
+// tarefas.c (tarefa de display corrigida)
 //---------------------------------------------------------------------------------------------//
 void task_distancia_display(void *params) {
     if (xSemaphoreTake(self_test_sem, portMAX_DELAY) == pdTRUE) {
         printf("[TAREFA] Sinal recebido. Iniciando Distancia Display Task...\n");
         
+        // --- CORREÇÃO CRÍTICA AQUI ---
+        // Adiciona uma pequena pausa para garantir que o sensor esteja totalmente
+        // estável após a complexa sequência de inicialização.
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        // Inicia o modo de medição contínua.
         vl53l0x_start_continuous(&sensor_dev, 0);
 
         uint16_t distancia_local_mm;
@@ -284,6 +290,7 @@ void task_distancia_display(void *params) {
                 if (leitura_ok) {
                     oled_exibir_4digitos(&oled, distancia_local_mm);
                 } else {
+                    // Exibe "----" em caso de erro de leitura
                     oled_exibir_caractere_grande(&oled, '-', 10);
                     oled_exibir_caractere_grande(&oled, '-', 36);
                     oled_exibir_caractere_grande(&oled, '-', 62);

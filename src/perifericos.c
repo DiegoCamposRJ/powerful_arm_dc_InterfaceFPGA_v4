@@ -186,13 +186,13 @@ void test_sensor_aht10() {
 void test_sensor_vl53l0x() {
     printf("  [TESTE] Testando Sensor VL53L0X...\n");
 
-    // Usa a instância global 'sensor_dev'
-    if (!vl53l0x_init(&sensor_dev, i2c0)) { // Passa o endereço da struct
+    // A inicialização bem-sucedida já confirma que a comunicação I2C está OK.
+    if (!vl53l0x_init(&sensor_dev, i2c0)) {
         printf("  [ERRO] Falha ao inicializar o sensor VL53L0X.\n");
-        // Em um sistema real, poderíamos travar aqui ou sinalizar um erro crítico.
-        return;
+        // Se a inicialização falhar, o erro é crítico.
+    } else {
+        printf("  [OK] Sensor VL53L0X inicializado com sucesso.\n");
     }
-    printf("  [OK] Sensor VL53L0X inicializado com sucesso.\n");
 
     // Faz uma leitura única para confirmar que está funcionando
     uint16_t distancia = vl53l0x_read_range_single_millimeters(&sensor_dev);
