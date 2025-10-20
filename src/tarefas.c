@@ -10,10 +10,12 @@
 
 #include "perifericos.h"
 #include "bitdoglab_pins.h"
-#include "aht10.h"
+// #include "aht10.h"
 #include "oled_context.h"
 #include "ssd1306_text.h"
 #include "numeros_display.h"
+#include "vl53l0x.h"
+#include "tarefas.h" // Inclui o próprio header para consistência
 
 //---------------------------------------------------------------------------------------------//
 // Variáveis Globais e Externas
@@ -31,7 +33,9 @@ extern ssd1306_t oled;
 extern const float ADC_CONVERSION_FACTOR;
 
 // Variável global para compartilhar os dados do sensor entre as tarefas
-aht10_data_t dados_sensor_clima;
+// aht10_data_t dados_sensor_clima;
+uint16_t distancia_global_mm = 0;
+vl53l0x_dev sensor_dev; // <-- ADICIONE A INSTÂNCIA GLOBAL DO SENSOR
 
 
 //---------------------------------------------------------------------------------------------//
@@ -46,14 +50,15 @@ void task_self_test(void *params) {
     test_buzzer_pwm();       vTaskDelay(pdMS_TO_TICKS(1000));
     test_botoes();           vTaskDelay(pdMS_TO_TICKS(1000));
     test_microfone();        vTaskDelay(pdMS_TO_TICKS(1000));
-    test_sensor_aht10();     vTaskDelay(pdMS_TO_TICKS(1000));
+    // test_sensor_aht10();     vTaskDelay(pdMS_TO_TICKS(1000));
+    test_sensor_vl53l0x();   vTaskDelay(pdMS_TO_TICKS(1000)); 
 
     printf("[TAREFA 1] Self-Test concluido. Sinalizando para as outras tarefas.\n\n");
 
     // Libera o semáforo para as 3 tarefas que estão esperando
     xSemaphoreGive(self_test_sem); // Para task_alive
     xSemaphoreGive(self_test_sem); // Para task_aht10_display
-    xSemaphoreGive(self_test_sem); // Para task_alerta_clima
+    // xSemaphoreGive(self_test_sem); // Para task_alerta_clima
 
     // A tarefa de teste se deleta, pois não é mais necessária
     vTaskDelete(NULL);
@@ -76,7 +81,7 @@ void task_alive(void *params) {
     }
 }
 
-
+/**
 //---------------------------------------------------------------------------------------------//
 // Tarefa 4: Leitura do Sensor AHT10 e Exibição no OLED
 //---------------------------------------------------------------------------------------------//
@@ -193,8 +198,150 @@ void task_alerta_clima(void *params) {
         }
     }
 }
+*/
 
 
 
 
+
+/**
+//---------------------------------------------------------------------------------------------//
+// Tarefa 6: Leitura do Sensor VL53L0X e Exibição no OLED
+//---------------------------------------------------------------------------------------------//
+void task_distancia_display(void *params) {
+    if (xSemaphoreTake(self_test_sem, portMAX_DELAY) == pdTRUE) {
+        printf("[TAREFA 6] Sinal recebido. Iniciando Distancia Display Task...\n");
+
+        char linha_dist[20];
+        uint16_t distancia_mm;
+        bool leitura_ok = false;
+
+        while (true) {
+            // Bloco de Leitura do Sensor (protegido pelo mutex do I2C0)
+            if (xSemaphoreTake(i2c0_mutex, portMAX_DELAY) == pdTRUE) {
+                distancia_mm = vl53l0x_read_range_single_millimeters(i2c0);
+                xSemaphoreGive(i2c0_mutex);
+            }
+
+            // O sensor retorna valores altos (ex: 8190) quando não consegue ler
+            leitura_ok = (distancia_mm < 8190);
+
+            if (leitura_ok) {
+                snprintf(linha_dist, sizeof(linha_dist), "Dist: %d mm", distancia_mm);
+            } else {
+                snprintf(linha_dist, sizeof(linha_dist), "Dist: --- mm");
+            }
+
+            // Bloco de Escrita no Display (protegido pelo mutex do I2C)
+            // ATENÇÃO: O OLED está no i2c1, mas o recurso é o display em si.
+            // Vamos precisar de um mutex para o display para evitar que esta tarefa
+            // e a task_aht10_display escrevam ao mesmo tempo.
+            if (xSemaphoreTake(i2c0_mutex, portMAX_DELAY) == pdTRUE) { // Reutilizando o mutex por simplicidade
+                // Escreve na linha 5 (y=48) para não apagar os dados do AHT10
+                ssd1306_draw_utf8_multiline(oled.ram_buffer, 0, 48, "                ", oled.width, oled.height); // Limpa a linha
+                ssd1306_draw_utf8_multiline(oled.ram_buffer, 0, 48, linha_dist, oled.width, oled.height);
+                oled_render(&oled);
+                xSemaphoreGive(i2c0_mutex);
+            }
+            
+            vTaskDelay(pdMS_TO_TICKS(500)); // Lê a distância a cada 500ms
+        }
+    }
+}
+
+*/
     
+
+//---------------------------------------------------------------------------------------------//
+// Tarefa de Leitura do Sensor VL53L0X e Exibição no OLED
+//---------------------------------------------------------------------------------------------//
+void task_distancia_display(void *params) {
+    if (xSemaphoreTake(self_test_sem, portMAX_DELAY) == pdTRUE) {
+        printf("[TAREFA] Sinal recebido. Iniciando Distancia Display Task...\n");
+        
+        vl53l0x_start_continuous(&sensor_dev, 0);
+
+        uint16_t distancia_local_mm;
+        bool leitura_ok;
+
+        while (true) {
+            if (xSemaphoreTake(i2c0_mutex, portMAX_DELAY) == pdTRUE) {
+                distancia_local_mm = vl53l0x_read_range_continuous_millimeters(&sensor_dev);
+                xSemaphoreGive(i2c0_mutex);
+            }
+
+            leitura_ok = (distancia_local_mm < 8190);
+
+            if (xSemaphoreTake(sensor_data_mutex, portMAX_DELAY) == pdTRUE) {
+                distancia_global_mm = leitura_ok ? distancia_local_mm : 9999;
+                xSemaphoreGive(sensor_data_mutex);
+            }
+
+            if (xSemaphoreTake(i2c0_mutex, portMAX_DELAY) == pdTRUE) {
+                oled_clear(&oled);
+                oled_centralizar_texto(&oled, "Distancia (mm)", 1);
+                
+                if (leitura_ok) {
+                    oled_exibir_4digitos(&oled, distancia_local_mm);
+                } else {
+                    oled_exibir_caractere_grande(&oled, '-', 10);
+                    oled_exibir_caractere_grande(&oled, '-', 36);
+                    oled_exibir_caractere_grande(&oled, '-', 62);
+                    oled_exibir_caractere_grande(&oled, '-', 88);
+                }
+                
+                oled_render(&oled);
+                xSemaphoreGive(i2c0_mutex);
+            }
+            
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
+}
+
+//---------------------------------------------------------------------------------------------//
+// Tarefa de Monitoramento de Alertas de PROXIMIDADE
+//---------------------------------------------------------------------------------------------//
+void task_alerta_proximidade(void *params) {
+    if (xSemaphoreTake(self_test_sem, portMAX_DELAY) == pdTRUE) {
+        printf("[TAREFA] Sinal recebido. Iniciando Alerta Proximidade Task...\n");
+
+        uint16_t distancia_local;
+        enum { NORMAL, ATENCAO, ALERTA } estado_atual = NORMAL;
+
+        while (true) {
+            if (xSemaphoreTake(sensor_data_mutex, portMAX_DELAY) == pdTRUE) {
+                distancia_local = distancia_global_mm;
+                xSemaphoreGive(sensor_data_mutex);
+            }
+
+            if (distancia_local < 100) {
+                if (estado_atual != ALERTA) {
+                    estado_atual = ALERTA;
+                    gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 0);
+                }
+                buzzer_set_freq(1500);
+                buzzer_set_alarm(true);
+                vTaskDelay(pdMS_TO_TICKS(100));
+                buzzer_set_alarm(false);
+                vTaskDelay(pdMS_TO_TICKS(100));
+
+            } else if (distancia_local < 300) {
+                if (estado_atual != ATENCAO) {
+                    estado_atual = ATENCAO;
+                    gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0);
+                    buzzer_set_alarm(false);
+                }
+                vTaskDelay(pdMS_TO_TICKS(200));
+
+            } else {
+                if (estado_atual != NORMAL) {
+                    estado_atual = NORMAL;
+                    gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0);
+                    buzzer_set_alarm(false);
+                }
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+        }
+    }
+}

@@ -7,7 +7,8 @@ add_executable(projeto_tcc_monitoramento
     ssd1306_text.c
     oled_context.c
 
-    aht10.c
+    # aht10.c
+    vl53l0x.c
 
     numeros_grandes.c
     numeros_medios.c

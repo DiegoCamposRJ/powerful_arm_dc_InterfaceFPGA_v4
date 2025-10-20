@@ -11,10 +11,11 @@
 #include "oled_context.h"
 #include "oled_display.h"
 #include "ssd1306_text.h"
-
+#include "tarefas.h" // <-- ADICIONE ESTE INCLUDE para ver 'sensor_dev'
 #include "numeros_display.h" 
 
-#include "aht10.h"
+#include "vl53l0x.h"
+// #include "aht10.h"
 #define I2C_PORT_AHT10 i2c0
 #define I2C_SDA_PIN_AHT10 0
 #define I2C_SCL_PIN_AHT10 1
@@ -157,7 +158,7 @@ void test_display_oled() {
     printf("  [OK] Display OLED testado.\n");
 }
 
-
+/**
 void test_sensor_aht10() {
     printf("  [TESTE] Testando Sensor AHT10...\n");
 
@@ -177,5 +178,28 @@ void test_sensor_aht10() {
         printf("  [OK] Sensor AHT10 testado.\n");
     } else {
         printf("  [ERRO] Falha ao ler os dados do sensor AHT10.\n");
+    }
+}
+*/
+// Dentro de perifericos.c, na função test_sensor_vl53l0x
+// Dentro de perifericos.c, na função test_sensor_vl53l0x
+void test_sensor_vl53l0x() {
+    printf("  [TESTE] Testando Sensor VL53L0X...\n");
+
+    // Usa a instância global 'sensor_dev'
+    if (!vl53l0x_init(&sensor_dev, i2c0)) { // Passa o endereço da struct
+        printf("  [ERRO] Falha ao inicializar o sensor VL53L0X.\n");
+        // Em um sistema real, poderíamos travar aqui ou sinalizar um erro crítico.
+        return;
+    }
+    printf("  [OK] Sensor VL53L0X inicializado com sucesso.\n");
+
+    // Faz uma leitura única para confirmar que está funcionando
+    uint16_t distancia = vl53l0x_read_range_single_millimeters(&sensor_dev);
+    if (distancia < 8190) {
+        printf("    - Leitura de teste: %d mm\n", distancia);
+        printf("  [OK] Sensor VL53L0X testado.\n");
+    } else {
+        printf("  [ERRO] Falha ao ler os dados do sensor VL53L0X.\n");
     }
 }

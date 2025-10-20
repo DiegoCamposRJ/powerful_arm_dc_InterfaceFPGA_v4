@@ -14,7 +14,8 @@ void buzzer_pwm_init();
 void buzzer_set_alarm(bool on);
 void test_buzzer_pwm();
 void test_display_oled();
-void test_sensor_aht10();
+// void test_sensor_aht10();
+void test_sensor_vl53l0x();
 void buzzer_set_freq(int freq); 
 
 #endif
