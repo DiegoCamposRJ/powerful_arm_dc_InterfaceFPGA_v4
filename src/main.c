@@ -24,9 +24,9 @@ int main() {
     stdio_init_all();
     sleep_ms(2000);
     // Aguarda em um loop até que a conexão USB seja estabelecida com o computador.
-    // while (!stdio_usb_connected()) {
-    //     sleep_ms(200);
-    // }
+    while (!stdio_usb_connected()) {
+        sleep_ms(200);
+    }
 
     init_perifericos();
     buzzer_pwm_init();

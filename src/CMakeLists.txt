@@ -9,6 +9,7 @@ add_executable(projeto_tcc_monitoramento
 
     # aht10.c
     vl53l0x.c
+    braco_config.c
 
     numeros_grandes.c
     numeros_medios.c

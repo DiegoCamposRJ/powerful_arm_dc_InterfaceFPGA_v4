@@ -17,5 +17,6 @@ void test_display_oled();
 // void test_sensor_aht10();
 void test_sensor_vl53l0x();
 void buzzer_set_freq(int freq); 
+void test_servo_base();
 
 #endif
