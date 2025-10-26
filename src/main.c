@@ -20,6 +20,7 @@ TaskHandle_t handle_braco_controle = NULL;
 SemaphoreHandle_t self_test_sem = NULL;
 SemaphoreHandle_t i2c0_mutex = NULL;
 SemaphoreHandle_t sensor_data_mutex = NULL;
+SemaphoreHandle_t servo_mutex = NULL;
 
 int main() {
     stdio_init_all();
@@ -39,8 +40,9 @@ int main() {
 
     i2c0_mutex = xSemaphoreCreateMutex();
     sensor_data_mutex = xSemaphoreCreateMutex();
+    servo_mutex = xSemaphoreCreateMutex();
 
-    if (self_test_sem == NULL || i2c0_mutex == NULL || sensor_data_mutex == NULL) {
+    if (self_test_sem == NULL || i2c0_mutex == NULL || sensor_data_mutex == NULL || servo_mutex == NULL) {
         printf("ERRO: Falha ao criar primitivas RTOS.\n");
         while(1);
     }

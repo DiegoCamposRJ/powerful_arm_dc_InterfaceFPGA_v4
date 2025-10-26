@@ -10,7 +10,7 @@
 #include "hardware/pwm.h"
 #include "hardware/i2c.h"
 #include "hardware/clocks.h"
-
+#include "semphr.h" 
 #include "oled_context.h"
 #include "oled_display.h"
 #include "ssd1306_text.h"
@@ -153,15 +153,27 @@ void test_sensor_vl53l0x() {
 
 void test_servo_base() {
     printf("  [TESTE] Testando Servo da Base...\n");
-    pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(0.0f));
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(90.0f));
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(180.0f));
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(90.0f));
-    vTaskDelay(pdMS_TO_TICKS(500));
-    pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), 0);
+
+    if (xSemaphoreTake(servo_mutex, portMAX_DELAY) == pdTRUE) {
+        // Move para 0 graus
+        pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(0.0f));
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // Move para 90 graus (centro)
+        pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(90.0f));
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // Move para 180 graus
+        pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(180.0f));
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // Retorna ao centro e desliga o pulso
+        pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(90.0f));
+        vTaskDelay(pdMS_TO_TICKS(500));
+        pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), 0);
+
+        xSemaphoreGive(servo_mutex); // Libera o controle do servo
+    }
     printf("  [OK] Servo da Base testado.\n");
 }
 

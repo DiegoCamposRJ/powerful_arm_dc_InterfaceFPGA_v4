@@ -16,6 +16,7 @@ extern TaskHandle_t handle_alerta_proximidade;
 // --- DECLARAÇÃO PÚBLICA DO SENSOR ---
 // Anuncia que a variável 'sensor_dev' existe em algum lugar do projeto.
 extern vl53l0x_dev sensor_dev; // <-- ADICIONE ESTA LINHA
+extern SemaphoreHandle_t servo_mutex;
 
 extern TaskHandle_t handle_braco_controle;
 
