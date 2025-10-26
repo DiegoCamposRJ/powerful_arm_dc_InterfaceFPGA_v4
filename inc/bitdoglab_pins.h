@@ -23,4 +23,9 @@
 // Tarefa 1: Microfone
 #define MIC_ADC_PIN 28    // ADC2
 
+// --- NOVAS DEFINIÇÕES PARA O JOYSTICK ---
+#define JOY_Y_PIN           26  // ADC0
+#define JOY_X_PIN           27  // ADC1
+#define BTN_SW_PIN          22  // Botão do Joystick (Entrada Digital)
+
 #endif

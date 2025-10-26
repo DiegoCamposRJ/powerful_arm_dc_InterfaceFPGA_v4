@@ -39,6 +39,7 @@ void task_self_test(void *params) {
     test_buzzer_pwm();       vTaskDelay(pdMS_TO_TICKS(1000));
     test_botoes();           vTaskDelay(pdMS_TO_TICKS(1000));
     test_microfone();        vTaskDelay(pdMS_TO_TICKS(1000));
+    test_joystick();         vTaskDelay(pdMS_TO_TICKS(1000)); 
     test_sensor_vl53l0x();   vTaskDelay(pdMS_TO_TICKS(1000));
     test_servo_base();       vTaskDelay(pdMS_TO_TICKS(1000));
 

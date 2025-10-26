@@ -46,8 +46,17 @@ void init_perifericos() {
     gpio_init(BTN_A_PIN); gpio_set_dir(BTN_A_PIN, GPIO_IN); gpio_pull_up(BTN_A_PIN);
     gpio_init(BTN_B_PIN); gpio_set_dir(BTN_B_PIN, GPIO_IN); gpio_pull_up(BTN_B_PIN);
 
+     // --- INICIALIZAÇÃO DO JOYSTICK ---
+    // Botão do Joystick (SW)
+    gpio_init(BTN_SW_PIN);
+    gpio_set_dir(BTN_SW_PIN, GPIO_IN);
+    gpio_pull_up(BTN_SW_PIN);
+
+    // ADC para Microfone e Eixos do Joystick
     adc_init();
     adc_gpio_init(MIC_ADC_PIN);
+    adc_gpio_init(JOY_Y_PIN); // ADC0
+    adc_gpio_init(JOY_X_PIN); // ADC1
 
     oled_init(&oled);
 
@@ -154,4 +163,27 @@ void test_servo_base() {
     vTaskDelay(pdMS_TO_TICKS(500));
     pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), 0);
     printf("  [OK] Servo da Base testado.\n");
+}
+
+// Nova função para testar o joystick
+void test_joystick() {
+    printf("  [TESTE] Testando Joystick...\n");
+
+    // Seleciona o canal ADC 0 (conectado ao pino GP26 - Eixo Y)
+    adc_select_input(0);
+    uint16_t joy_y_raw = adc_read();
+
+    // Seleciona o canal ADC 1 (conectado ao pino GP27 - Eixo X)
+    adc_select_input(1);
+    uint16_t joy_x_raw = adc_read();
+
+    // Lê o estado do botão do joystick (pino digital)
+    // Usamos '!' porque o pull-up interno faz o pino ler '1' quando solto e '0' quando pressionado.
+    bool btn_sw_pressed = !gpio_get(BTN_SW_PIN);
+
+    printf("    - Leitura Eixo Y (ADC0): %d\n", joy_y_raw);
+    printf("    - Leitura Eixo X (ADC1): %d\n", joy_x_raw);
+    printf("    - Botao SW Pressionado: %s\n", btn_sw_pressed ? "Sim" : "Nao");
+    
+    printf("  [OK] Joystick testado.\n");
 }
