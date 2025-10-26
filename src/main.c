@@ -14,6 +14,7 @@
 TaskHandle_t handle_self_test = NULL;
 TaskHandle_t handle_distancia_display = NULL;
 TaskHandle_t handle_alerta_proximidade = NULL;
+TaskHandle_t handle_braco_controle = NULL;
 
 // Primitivas de sincronização
 SemaphoreHandle_t self_test_sem = NULL;
@@ -50,6 +51,10 @@ int main() {
     
     xTaskCreate(task_alerta_proximidade, "Alerta Prox", 512, NULL, 3, &handle_alerta_proximidade);
     xTaskCreate(task_distancia_display, "Distancia Display", 2048, NULL, 2, &handle_distancia_display);
+
+    // --- CRIAÇÃO DA NOVA TAREFA DE CONTROLE ---
+    // Prioridade 2, a mesma do display, para não interferir com os alertas.
+    xTaskCreate(task_braco_controle, "Braco Ctrl", 1024, NULL, 2, &handle_braco_controle);
 
     vTaskStartScheduler();
 

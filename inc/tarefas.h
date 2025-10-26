@@ -17,6 +17,8 @@ extern TaskHandle_t handle_alerta_proximidade;
 // Anuncia que a variável 'sensor_dev' existe em algum lugar do projeto.
 extern vl53l0x_dev sensor_dev; // <-- ADICIONE ESTA LINHA
 
+extern TaskHandle_t handle_braco_controle;
+
 // Protótipo da tarefa
 void task_self_test(void *params);
 void task_alive(void *params);
@@ -24,5 +26,6 @@ void task_aht10_display(void *params);
 // void task_alerta_clima(void *params);
 void task_distancia_display(void *params);
 void task_alerta_proximidade(void *params);
+void task_braco_controle(void *params);
 
 #endif

@@ -6,6 +6,8 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
+#include <math.h>             // <-- CORREÇÃO: Adicionado para a função fabs()
+#include "hardware/adc.h"      // <-- CORREÇÃO: Adicionado para as funções do ADC
 
 #include "perifericos.h"
 #include "bitdoglab_pins.h"
@@ -23,7 +25,6 @@ extern SemaphoreHandle_t i2c0_mutex;
 extern SemaphoreHandle_t sensor_data_mutex;
 extern ssd1306_t oled;
 
-// Definição real das variáveis globais
 vl53l0x_dev sensor_dev;
 uint16_t distancia_global_mm = 0;
 
@@ -39,7 +40,7 @@ void task_self_test(void *params) {
     test_buzzer_pwm();       vTaskDelay(pdMS_TO_TICKS(1000));
     test_botoes();           vTaskDelay(pdMS_TO_TICKS(1000));
     test_microfone();        vTaskDelay(pdMS_TO_TICKS(1000));
-    test_joystick();         vTaskDelay(pdMS_TO_TICKS(1000)); 
+    test_joystick();         vTaskDelay(pdMS_TO_TICKS(1000));
     test_sensor_vl53l0x();   vTaskDelay(pdMS_TO_TICKS(1000));
     test_servo_base();       vTaskDelay(pdMS_TO_TICKS(1000));
 
@@ -58,7 +59,7 @@ void task_distancia_display(void *params) {
     if (xSemaphoreTake(self_test_sem, portMAX_DELAY) == pdTRUE) {
         printf("[TAREFA] Sinal recebido. Iniciando Distancia Display Task...\n");
         
-        vTaskDelay(pdMS_TO_TICKS(100)); // Pausa para estabilização do sensor
+        vTaskDelay(pdMS_TO_TICKS(100));
         vl53l0x_start_continuous(&sensor_dev, 0);
 
         uint16_t distancia_local_mm;
@@ -100,7 +101,7 @@ void task_distancia_display(void *params) {
 }
 
 //---------------------------------------------------------------------------------------------//
-// Tarefa de Monitoramento de Alertas e AÇÃO DO SERVO (ÚNICA DEFINIÇÃO)
+// Tarefa de Monitoramento de Alertas e AÇÃO DO SERVO
 //---------------------------------------------------------------------------------------------//
 void task_alerta_proximidade(void *params) {
     if (xSemaphoreTake(self_test_sem, portMAX_DELAY) == pdTRUE) {
@@ -116,69 +117,82 @@ void task_alerta_proximidade(void *params) {
                 xSemaphoreGive(sensor_data_mutex);
             }
 
-            // 1. Condição de Acionamento do Servo (MAIOR PRIORIDADE)
             if (distancia_local <= 150 && !servo_foi_acionado) {
                 if (estado_atual != ACAO_SERVO) {
                     printf("ACAO: Objeto detectado a %dmm. Movendo servo...\n", distancia_local);
                     estado_atual = ACAO_SERVO;
-                    
-                    gpio_put(LED_RGB_R, 1);
-                    gpio_put(LED_RGB_G, 1);
-                    gpio_put(LED_RGB_B, 1); // LED Branco
-                    
+                    gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 1);
                     buzzer_set_alarm(false);
                 }
-                
                 pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(0.0f));
                 vTaskDelay(pdMS_TO_TICKS(1000));
-                
                 pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), 0);
-                
                 servo_foi_acionado = true;
-            
             } 
-            // 2. Lógica de Alerta Crítico
             else if (distancia_local < 100) {
                 if (estado_atual != ALERTA) {
                     estado_atual = ALERTA;
-                    gpio_put(LED_RGB_R, 1);
-                    gpio_put(LED_RGB_G, 0);
-                    gpio_put(LED_RGB_B, 0); // LED Vermelho
+                    gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 0);
                 }
                 buzzer_set_freq(1500);
                 buzzer_set_alarm(true);
                 vTaskDelay(pdMS_TO_TICKS(100));
                 buzzer_set_alarm(false);
                 vTaskDelay(pdMS_TO_TICKS(100));
-
             } 
-            // 3. Lógica de Atenção
             else if (distancia_local < 300) {
                 if (estado_atual != ATENCAO) {
                     estado_atual = ATENCAO;
-                    gpio_put(LED_RGB_R, 1);
-                    gpio_put(LED_RGB_G, 1);
-                    gpio_put(LED_RGB_B, 0); // LED Amarelo
+                    gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0);
                     buzzer_set_alarm(false);
                 }
                 if (distancia_local > 150) {
                     servo_foi_acionado = false;
                 }
                 vTaskDelay(pdMS_TO_TICKS(200));
-
             } 
-            // 4. Condição Normal
             else {
                 if (estado_atual != NORMAL) {
                     estado_atual = NORMAL;
-                    gpio_put(LED_RGB_R, 0);
-                    gpio_put(LED_RGB_G, 1);
-                    gpio_put(LED_RGB_B, 0); // LED Verde
+                    gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0);
                     buzzer_set_alarm(false);
                 }
                 servo_foi_acionado = false;
                 vTaskDelay(pdMS_TO_TICKS(500));
             }
         }
+    }
+}
+
+//---------------------------------------------------------------------------------------------//
+// Tarefa de Controle do Braço Robótico com Joystick
+//---------------------------------------------------------------------------------------------//
+void task_braco_controle(void *params) {
+    printf("[TAREFA] Iniciando Tarefa de Controle do Braco...\n");
+
+    float current_base_angle = 90.0f;
+    const float SMOOTHING_ALPHA = 0.1f;
+
+    while (true) {
+        bool btn_a_pressed = !gpio_get(BTN_A_PIN);
+
+        if (btn_a_pressed) {
+            adc_select_input(1); // ADC1 é o Eixo X (GP27)
+            uint16_t joy_x_raw = adc_read();
+
+            float normalized = (joy_x_raw - 2048.0f) / 2048.0f;
+
+            if (fabs(normalized) < 0.15f) {
+                pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), 0);
+            } else {
+                float target_angle = 90.0f + (normalized * 90.0f);
+                current_base_angle = current_base_angle * (1.0f - SMOOTHING_ALPHA) + target_angle * SMOOTHING_ALPHA;
+                pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(current_base_angle));
+            }
+        } else {
+            pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), 0);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
