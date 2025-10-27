@@ -11,6 +11,9 @@
 
 // --- Definição das Variáveis Globais ---
 uint slice_base;
+uint slice_braco;
+uint slice_garra;
+uint slice_angulo;
 
 // --- Implementação das Funções ---
 

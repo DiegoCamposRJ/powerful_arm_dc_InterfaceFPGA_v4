@@ -19,6 +19,7 @@
 #include "tarefas.h"
 #include "braco_config.h"
 
+
 const float ADC_CONVERSION_FACTOR = 3.3f / (1 << 12);
 static uint slice_num_buzzer;
 extern ssd1306_t oled;
@@ -66,10 +67,18 @@ void init_perifericos() {
     gpio_pull_up(0);
     gpio_pull_up(1);
 
-    // --- CORREÇÃO 1: CÁLCULO DO PWM DO SERVO ---
+     // --- INICIALIZAÇÃO DE TODOS OS SERVOS ---
     gpio_set_function(SERVO_BASE_PIN, GPIO_FUNC_PWM);
-    slice_base = pwm_gpio_to_slice_num(SERVO_BASE_PIN);
+    gpio_set_function(SERVO_BRACO_PIN, GPIO_FUNC_PWM);
+    gpio_set_function(SERVO_GARRA_PIN, GPIO_FUNC_PWM);
+    gpio_set_function(SERVO_ANGULO_PIN, GPIO_FUNC_PWM);
 
+    slice_base = pwm_gpio_to_slice_num(SERVO_BASE_PIN);
+    slice_braco = pwm_gpio_to_slice_num(SERVO_BRACO_PIN);
+    slice_garra = pwm_gpio_to_slice_num(SERVO_GARRA_PIN);
+    slice_angulo = pwm_gpio_to_slice_num(SERVO_ANGULO_PIN);
+
+    
     pwm_config config = pwm_get_default_config();
     // Usamos um divisor maior para que o valor de 'wrap' seja menor que 65535.
     // 125MHz / 40 = 3.125MHz.
@@ -79,11 +88,22 @@ void init_perifericos() {
     uint16_t wrap = 62500 - 1; 
     pwm_config_set_wrap(&config, wrap);
     
+     // Inicia o PWM para cada slice
     pwm_init(slice_base, &config, true);
+    pwm_init(slice_braco, &config, true);
+    pwm_init(slice_garra, &config, true);
+    pwm_init(slice_angulo, &config, true);
     
+    // Posiciona todos os servos em 90 graus e desliga o pulso
     pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(90.0f));
+    pwm_set_chan_level(slice_braco, pwm_gpio_to_channel(SERVO_BRACO_PIN), angle_to_duty(90.0f));
+    pwm_set_chan_level(slice_garra, pwm_gpio_to_channel(SERVO_GARRA_PIN), angle_to_duty(90.0f));
+    pwm_set_chan_level(slice_angulo, pwm_gpio_to_channel(SERVO_ANGULO_PIN), angle_to_duty(90.0f));
     sleep_ms(500);
     pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), 0);
+    pwm_set_chan_level(slice_braco, pwm_gpio_to_channel(SERVO_BRACO_PIN), 0);
+    pwm_set_chan_level(slice_garra, pwm_gpio_to_channel(SERVO_GARRA_PIN), 0);
+    pwm_set_chan_level(slice_angulo, pwm_gpio_to_channel(SERVO_ANGULO_PIN), 0);
 }
 
 void test_leds_rgb() {
@@ -151,30 +171,74 @@ void test_sensor_vl53l0x() {
     }
 }
 
-void test_servo_base() {
-    printf("  [TESTE] Testando Servo da Base...\n");
+//---------------------------------------------------------------------------------------------//
+// perifericos.c -> Substitua a função test_servos
+//---------------------------------------------------------------------------------------------//
+void test_servos() {
+    printf("  [TESTE] Testando todos os Servos via Fila de Comandos...\n");
 
-    if (xSemaphoreTake(servo_mutex, portMAX_DELAY) == pdTRUE) {
-        // Move para 0 graus
-        pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(0.0f));
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    // Declara a variável de comando APENAS UMA VEZ.
+    ServoCommand_t cmd;
 
-        // Move para 90 graus (centro)
-        pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(90.0f));
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    // --- Testa a Base ---
+    printf("    - Testando Base...\n");
+    // Atribui um novo valor à variável 'cmd' existente.
+    cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = 0.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
-        // Move para 180 graus
-        pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(180.0f));
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = 180.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
-        // Retorna ao centro e desliga o pulso
-        pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(90.0f));
-        vTaskDelay(pdMS_TO_TICKS(500));
-        pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), 0);
+    cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = 90.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
-        xSemaphoreGive(servo_mutex); // Libera o controle do servo
-    }
-    printf("  [OK] Servo da Base testado.\n");
+    // --- Testa o Braço ---
+    printf("    - Testando Braco...\n");
+    cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = 0.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = 180.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = 90.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // --- Testa a Garra ---
+    printf("    - Testando Garra...\n");
+    cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = 0.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = 180.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = 90.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // --- Testa o Ângulo ---
+    printf("    - Testando Angulo...\n");
+    // CORREÇÃO: Removemos o "ServoCommand_t" do início da linha.
+    cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = 0.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = 180.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = 90.0f };
+    xQueueSend(servo_command_queue, &cmd, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    printf("  [OK] Servos testados.\n");
 }
 
 // Nova função para testar o joystick

@@ -14,13 +14,18 @@
 TaskHandle_t handle_self_test = NULL;
 TaskHandle_t handle_distancia_display = NULL;
 TaskHandle_t handle_alerta_proximidade = NULL;
-TaskHandle_t handle_braco_controle = NULL;
+TaskHandle_t handle_coordenador_controle = NULL;
+TaskHandle_t handle_control_garra = NULL;
+TaskHandle_t handle_control_braco = NULL;
+TaskHandle_t handle_servo_manager = NULL;
 
 // Primitivas de sincronização
 SemaphoreHandle_t self_test_sem = NULL;
 SemaphoreHandle_t i2c0_mutex = NULL;
 SemaphoreHandle_t sensor_data_mutex = NULL;
-SemaphoreHandle_t servo_mutex = NULL;
+// SemaphoreHandle_t servo_mutex = NULL;
+SemaphoreHandle_t input_mutex = NULL; 
+QueueHandle_t servo_command_queue = NULL;
 
 int main() {
     stdio_init_all();
@@ -40,23 +45,31 @@ int main() {
 
     i2c0_mutex = xSemaphoreCreateMutex();
     sensor_data_mutex = xSemaphoreCreateMutex();
-    servo_mutex = xSemaphoreCreateMutex();
+    // servo_mutex = xSemaphoreCreateMutex();
+    input_mutex = xSemaphoreCreateMutex();
+    // Cria uma fila que pode conter até 10 comandos de servo
+    servo_command_queue = xQueueCreate(10, sizeof(ServoCommand_t));
 
-    if (self_test_sem == NULL || i2c0_mutex == NULL || sensor_data_mutex == NULL || servo_mutex == NULL) {
+    if (self_test_sem == NULL || i2c0_mutex == NULL || sensor_data_mutex == NULL || input_mutex == NULL || servo_command_queue == NULL)  {
         printf("ERRO: Falha ao criar primitivas RTOS.\n");
         while(1);
     }
 
     printf("Sistema inicializado. Criando tarefas FreeRTOS...\n");
 
-    xTaskCreate(task_self_test, "Self-Test Task", 2048, NULL, 1, &handle_self_test);
-    
-    xTaskCreate(task_alerta_proximidade, "Alerta Prox", 512, NULL, 3, &handle_alerta_proximidade);
-    xTaskCreate(task_distancia_display, "Distancia Display", 2048, NULL, 2, &handle_distancia_display);
+    xTaskCreate(task_self_test, "Self-Test", 2048, NULL, 1, &handle_self_test); // Prioridade mais baixa
+    xTaskCreate(task_distancia_display, "Display", 2048, NULL, 2, &handle_distancia_display);
+    xTaskCreate(task_coordenador_controle, "Coord Ctrl", 1024, NULL, 2, &handle_coordenador_controle);
 
-    // --- CRIAÇÃO DA NOVA TAREFA DE CONTROLE ---
-    // Prioridade 2, a mesma do display, para não interferir com os alertas.
-    xTaskCreate(task_braco_controle, "Braco Ctrl", 1024, NULL, 2, &handle_braco_controle);
+    // Tarefas de controle manual (produtoras)
+    xTaskCreate(task_control_garra, "Garra Ctrl", 1024, NULL, 3, &handle_control_garra);
+    xTaskCreate(task_control_braco, "Braco Ctrl", 1024, NULL, 3, &handle_control_braco);
+
+    // Tarefa gerente do servo (consumidora) - DEVE ter prioridade alta
+    xTaskCreate(task_servo_manager, "Servo Mgr", 1024, NULL, 4, &handle_servo_manager);
+
+    // Tarefa de alerta (crítica) - DEVE ter a prioridade mais alta
+    xTaskCreate(task_alerta_proximidade, "Alerta", 512, NULL, 5, &handle_alerta_proximidade);
 
     vTaskStartScheduler();
 

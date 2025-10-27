@@ -1,32 +1,53 @@
+//---------------------------------------------------------------------------------------------//
+// tarefas.h
+//---------------------------------------------------------------------------------------------//
 #ifndef TAREFAS_H
 #define TAREFAS_H
 
 #include "FreeRTOS.h"
 #include "task.h"
-#include "vl53l0x.h" // <-- ADICIONE ESTE INCLUDE para conhecer o tipo 'vl53l0x_dev'
+#include "semphr.h"      // Necessário para SemaphoreHandle_t
+#include "vl53l0x.h"     // Necessário para o tipo vl53l0x_dev
 
-// Handle para a tarefa de autoteste
+// --- Estrutura para compartilhar dados de entrada ---
+typedef struct {
+    bool btn_a_pressed;
+    bool btn_b_pressed;
+    float joy_x_norm; // Joystick X normalizado (-1.0 a 1.0)
+    float joy_y_norm; // Joystick Y normalizado (-1.0 a 1.0)
+} InputData_t;
+
+// --- ESTRUTURA PARA COMANDOS DO SERVO ---
+typedef enum { SERVO_BASE, SERVO_BRACO, SERVO_GARRA, SERVO_ANGULO } ServoID_t;
+typedef struct {
+    ServoID_t servo_id;
+    float angle;
+} ServoCommand_t;
+
+// --- Handles das Tarefas ---
 extern TaskHandle_t handle_self_test;
-extern TaskHandle_t handle_alive_task; 
-extern TaskHandle_t handle_aht10_display;
-// extern TaskHandle_t handle_alerta_clima;
 extern TaskHandle_t handle_distancia_display;
 extern TaskHandle_t handle_alerta_proximidade;
+extern TaskHandle_t handle_coordenador_controle;
+extern TaskHandle_t handle_control_garra;
+extern TaskHandle_t handle_control_braco;
+extern TaskHandle_t handle_servo_manager;
 
-// --- DECLARAÇÃO PÚBLICA DO SENSOR ---
-// Anuncia que a variável 'sensor_dev' existe em algum lugar do projeto.
-extern vl53l0x_dev sensor_dev; // <-- ADICIONE ESTA LINHA
-extern SemaphoreHandle_t servo_mutex;
+// --- Declaração Pública de Variáveis e Primitivas Globais ---
+// Estas variáveis são DEFINIDAS em tarefas.c e declaradas aqui para serem
+// visíveis em outros arquivos (como perifericos.c).
+extern vl53l0x_dev sensor_dev;
+// extern SemaphoreHandle_t servo_mutex;
+extern SemaphoreHandle_t input_mutex;
+extern QueueHandle_t servo_command_queue; // <-- NOVO: Fila em vez de Mutex
 
-extern TaskHandle_t handle_braco_controle;
-
-// Protótipo da tarefa
+// --- Protótipos das Tarefas ---
 void task_self_test(void *params);
-void task_alive(void *params);
-void task_aht10_display(void *params);
-// void task_alerta_clima(void *params);
 void task_distancia_display(void *params);
 void task_alerta_proximidade(void *params);
-void task_braco_controle(void *params);
+void task_coordenador_controle(void *params);
+void task_control_garra(void *params);
+void task_control_braco(void *params);
+void task_servo_manager(void *params);
 
 #endif
