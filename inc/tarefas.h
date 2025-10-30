@@ -17,6 +17,9 @@ typedef struct {
     float joy_y_norm; // Joystick Y normalizado (-1.0 a 1.0)
 } InputData_t;
 
+// --- Enum para o modo de controle do braço ---
+typedef enum { MODE_IDLE, MODE_BASE, MODE_BRACO, MODE_ANGULO } ControlMode_t;
+
 // --- ESTRUTURA PARA COMANDOS DO SERVO ---
 typedef enum { SERVO_BASE, SERVO_BRACO, SERVO_GARRA, SERVO_ANGULO } ServoID_t;
 typedef struct {
@@ -40,6 +43,7 @@ extern vl53l0x_dev sensor_dev;
 // extern SemaphoreHandle_t servo_mutex;
 extern SemaphoreHandle_t input_mutex;
 extern QueueHandle_t servo_command_queue; // <-- NOVO: Fila em vez de Mutex
+extern ControlMode_t global_control_mode; // <-- NOVO: Variável para compartilhar o modo do botão B
 
 // --- Protótipos das Tarefas ---
 void task_self_test(void *params);

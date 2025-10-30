@@ -25,6 +25,7 @@ extern SemaphoreHandle_t i2c0_mutex;
 extern SemaphoreHandle_t sensor_data_mutex;
 extern SemaphoreHandle_t input_mutex;
 extern QueueHandle_t servo_command_queue;
+ControlMode_t global_control_mode = MODE_IDLE;
 
 extern ssd1306_t oled;
 vl53l0x_dev sensor_dev;
@@ -104,28 +105,38 @@ void task_distancia_display(void *params) {
 }
 
 //---------------------------------------------------------------------------------------------//
-// TAREFA DE MONITORAMENTO DE ALERTAS (VERSÃO FINAL E ROBUSTA)
+// TAREFA DE MONITORAMENTO DE ALERTAS E AÇÃO COREOGRAFADA DO BRAÇO
 //---------------------------------------------------------------------------------------------//
 void task_alerta_proximidade(void *params) {
     if (xSemaphoreTake(self_test_sem, portMAX_DELAY) == pdTRUE) {
         printf("[TAREFA] Sinal recebido. Iniciando Alerta/Acao Task...\n");
 
         uint16_t distancia_local;
+        InputData_t input_local; // Struct para armazenar o estado dos botões
         enum { NORMAL, ATENCAO, ALERTA_SONORO, ACAO_SERVO } estado_atual = NORMAL;
+        bool acao_ja_executada = false; // Flag para garantir que a sequência rode apenas uma vez
 
         while (true) {
+            // Obtém a distância mais recente
             if (xSemaphoreTake(sensor_data_mutex, portMAX_DELAY) == pdTRUE) {
                 distancia_local = distancia_global_mm;
                 xSemaphoreGive(sensor_data_mutex);
             }
+            // Obtém o estado mais recente dos botões/joystick
+            if (xSemaphoreTake(input_mutex, portMAX_DELAY) == pdTRUE) {
+                input_local = shared_input_data;
+                xSemaphoreGive(input_mutex);
+            }
 
-            // --- LÓGICA DE ESTADO CORRIGIDA ---
+            // --- CONDIÇÃO DE GUARDA PARA AÇÃO AUTOMÁtica ---
+            // Verifica se o controle manual está inativo
+            bool controle_manual_inativo = (!input_local.btn_a_pressed && global_control_mode == MODE_IDLE);
 
-            // 1. Condição de Alerta Crítico (MAIS ESPECÍFICA)
+            // 1. Condição de Alerta Crítico (sempre ativo, prioridade máxima)
             if (distancia_local < 100) {
                 if (estado_atual != ALERTA_SONORO) {
                     estado_atual = ALERTA_SONORO;
-                    gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 0);
+                    gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 0); // Vermelho
                 }
                 buzzer_set_freq(1500);
                 buzzer_set_alarm(true);
@@ -133,21 +144,37 @@ void task_alerta_proximidade(void *params) {
                 buzzer_set_alarm(false);
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
-            // 2. Condição de Ação do Servo (MENOS ESPECÍFICA)
-            else if (distancia_local <= 150) {
+            // 2. Condição de Ação da Sequência de Servos (COM GUARDA E LIMITES SEGUROS)
+            else if (distancia_local <= 150 && !acao_ja_executada && controle_manual_inativo) {
                 if (estado_atual != ACAO_SERVO) {
                     estado_atual = ACAO_SERVO;
                     gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 1); // Branco
                     buzzer_set_alarm(false);
                 }
                 
-                ServoCommand_t cmd = { .servo_id = SERVO_BASE, .angle = 0.0f };
-                // **FERRAMENTA DE DIAGNÓSTICO:** Verifica se o envio falhou
-                if (xQueueSend(servo_command_queue, &cmd, 0) != pdPASS) {
-                    printf("ERRO: Fila de comandos do servo esta cheia! Comando de alerta descartado.\n");
-                }
+                printf("ACAO: Controle manual inativo e objeto detectado. Executando sequencia...\n");
                 
-                vTaskDelay(pdMS_TO_TICKS(100));
+                ServoCommand_t cmd;
+
+                // Passo 1: Mover o Braço (Altura) para sua posição MÍNIMA
+                printf("COMANDO [Alerta]: Movendo BRACO para %.1f graus\n", BRACO_MIN_ANGLE);
+                cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = BRACO_MIN_ANGLE };
+                xQueueSend(servo_command_queue, &cmd, 0);
+                vTaskDelay(pdMS_TO_TICKS(700)); // Espera o movimento completar
+
+                // Passo 2: Mover o Ângulo para sua posição MÁXIMA
+                printf("COMANDO [Alerta]: Movendo ANGULO para %.1f graus\n", ANGULO_MAX_ANGLE);
+                cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = ANGULO_MAX_ANGLE };
+                xQueueSend(servo_command_queue, &cmd, 0);
+                vTaskDelay(pdMS_TO_TICKS(700));
+
+                // Passo 3: Fechar a Garra (mover para sua posição MÍNIMA)
+                printf("COMANDO [Alerta]: Movendo GARRA para %.1f graus\n", GARRA_MIN_ANGLE);
+                cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = GARRA_MIN_ANGLE };
+                xQueueSend(servo_command_queue, &cmd, 0);
+                vTaskDelay(pdMS_TO_TICKS(700));
+
+                acao_ja_executada = true; // Marca que a sequência foi executada
             } 
             // 3. Lógica de Atenção
             else if (distancia_local < 300) {
@@ -156,15 +183,24 @@ void task_alerta_proximidade(void *params) {
                     gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0); // Amarelo
                     buzzer_set_alarm(false);
                 }
+                // Rearma a sequência se o objeto sair da zona de perigo
+                if (distancia_local > 150) {
+                    acao_ja_executada = false;
+                }
                 vTaskDelay(pdMS_TO_TICKS(200));
             } 
             // 4. Condição Normal
             else {
                 if (estado_atual != NORMAL) {
                     estado_atual = NORMAL;
-                    gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0); // Verde
+                    // Apenas muda o LED se o controle manual estiver inativo
+                    if (controle_manual_inativo) {
+                        gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0); // Verde
+                    }
                     buzzer_set_alarm(false);
                 }
+                // Rearma a sequência
+                acao_ja_executada = false;
                 vTaskDelay(pdMS_TO_TICKS(500));
             }
         }
@@ -196,9 +232,9 @@ void task_coordenador_controle(void *params) {
     }
 }
 
-//---------------------------------------------------------------------------------------------//
-// TAREFA DE CONTROLE DA GARRA (BOTÃO A)
-//---------------------------------------------------------------------------------------------//
+// =============================================================================================
+// TAREFA DE CONTROLE DA GARRA (BOTÃO A) - VERSÃO FINAL COM MAPEAMENTO CORRETO
+// =============================================================================================
 void task_control_garra(void *params) {
     printf("[TAREFA] Iniciando Controle da Garra (Botao A)...\n");
     float garra_angle = 90.0f;
@@ -213,119 +249,114 @@ void task_control_garra(void *params) {
 
         if (local_data.btn_a_pressed) {
             if (fabs(local_data.joy_y_norm) > 0.15f) {
-                float target = 90.0f - (local_data.joy_y_norm * 90.0f);
-                garra_angle = garra_angle * (1.0f - SMOOTHING_ALPHA) + target * SMOOTHING_ALPHA;
+                // --- LÓGICA DE MAPEAMENTO CORRIGIDA ---
+                const float center_angle = (GARRA_MAX_ANGLE + GARRA_MIN_ANGLE) / 2.0f;
+                const float amplitude = (GARRA_MAX_ANGLE - GARRA_MIN_ANGLE) / 2.0f;
+                float target_angle = center_angle - (local_data.joy_y_norm * amplitude); // Eixo Y invertido
+
+                garra_angle = garra_angle * (1.0f - SMOOTHING_ALPHA) + target_angle * SMOOTHING_ALPHA;
                 
                 ServoCommand_t cmd = { .servo_id = SERVO_GARRA, .angle = garra_angle };
                 xQueueSend(servo_command_queue, &cmd, 0);
+                printf("COMANDO [Garra]: Movendo para %.1f graus\n", garra_angle);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(25));
     }
 }
 
-//---------------------------------------------------------------------------------------------//
-// TAREFA DE CONTROLE DO BRAÇO (BOTÃO B) - VERSÃO FINAL
-//---------------------------------------------------------------------------------------------//
+// =============================================================================================
+// TAREFA DE CONTROLE DO BRAÇO (BOTÃO B) - VERSÃO FINAL COM MAPEAMENTO CORRETO
+// =============================================================================================
 void task_control_braco(void *params) {
     printf("[TAREFA] Iniciando Controle do Braco (Botao B)...\n");
-    
-    // A máquina de estados para ciclar entre os modos de controle
     typedef enum { MODE_IDLE, MODE_BASE, MODE_BRACO, MODE_ANGULO } control_mode_t;
     control_mode_t current_mode = MODE_IDLE;
 
-    // Variáveis para a lógica de detecção de clique (toggle) com debounce
     bool last_btn_b_state = false;
     uint32_t last_debounce_time = 0;
-    const uint32_t DEBOUNCE_DELAY = 250; // Evita múltiplos cliques
+    const uint32_t DEBOUNCE_DELAY = 250;
 
-    // Armazena a última posição conhecida de cada servo para suavização
-    float angles[3] = {90.0f, 90.0f, 90.0f}; // Posições para Base, Braço, Ângulo
-    const float SMOOTHING_ALPHA = 0.1f;      // Fator de suavização para movimentos fluidos
-    
-    // Struct local para armazenar os dados de entrada lidos da variável global
+    float angles[3] = {90.0f, 90.0f, 90.0f};
+    const float SMOOTHING_ALPHA = 0.1f;
     InputData_t local_data;
 
     while (true) {
-        // 1. Obtém a cópia mais recente dos dados de entrada (joystick e botões)
         if (xSemaphoreTake(input_mutex, portMAX_DELAY) == pdTRUE) {
             local_data = shared_input_data;
             xSemaphoreGive(input_mutex);
         }
 
-        // 2. Verifica se o controle da Garra (Botão A) está ativo. Se estiver, esta tarefa cede a prioridade.
         if (local_data.btn_a_pressed) {
-            // Pausa e pula o resto do loop para não interferir com o controle da garra.
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
 
-        // 3. Lógica de clique do Botão B para alternar (ciclar) os modos de controle
         uint32_t now = to_ms_since_boot(get_absolute_time());
         if (local_data.btn_b_pressed && !last_btn_b_state && (now - last_debounce_time > DEBOUNCE_DELAY)) {
             last_debounce_time = now;
-            current_mode = (current_mode + 1) % 4; // Cicla os modos: 0->1->2->3->0
-            
-            // Fornece feedback visual e no monitor serial sobre o modo atual
+            current_mode = (control_mode_t)((current_mode + 1) % 4);
+            global_control_mode = current_mode;
             const char* modes[] = {"IDLE", "BASE", "BRACO", "ANGULO"};
             printf("MODO (Botao B): %s\n", modes[current_mode]);
         }
         last_btn_b_state = local_data.btn_b_pressed;
 
-        // 4. Executa a ação correspondente ao modo atual, se não for IDLE
         if (current_mode != MODE_IDLE) {
             ServoCommand_t cmd;
             bool send_cmd = false;
+            float target_angle;
+            const char* servo_name = "";
 
             switch (current_mode) {
                 case MODE_BASE:
-                    // Feedback visual: LED Vermelho
+                    servo_name = "Base";
                     gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 0);
-                    // Controla a Base com o eixo X do joystick
                     if (fabs(local_data.joy_x_norm) > 0.15f) {
-                        float target = 90.0f + (local_data.joy_x_norm * 90.0f);
-                        angles[0] = angles[0] * (1.0f - SMOOTHING_ALPHA) + target * SMOOTHING_ALPHA;
+                        const float center = (BASE_MAX_ANGLE + BASE_MIN_ANGLE) / 2.0f;
+                        const float amplitude = (BASE_MAX_ANGLE - BASE_MIN_ANGLE) / 2.0f;
+                        target_angle = center + (local_data.joy_x_norm * amplitude);
+                        
+                        angles[0] = angles[0] * (1.0f - SMOOTHING_ALPHA) + target_angle * SMOOTHING_ALPHA;
                         cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = angles[0] };
                         send_cmd = true;
                     }
                     break;
 
                 case MODE_BRACO:
-                    // Feedback visual: LED Verde
+                    servo_name = "Braco";
                     gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0);
-                    // Controla o Braço (altura) com o eixo Y do joystick
                     if (fabs(local_data.joy_y_norm) > 0.15f) {
-                        float target = 90.0f - (local_data.joy_y_norm * 90.0f); // Eixo Y invertido
-                        angles[1] = angles[1] * (1.0f - SMOOTHING_ALPHA) + target * SMOOTHING_ALPHA;
+                        const float center = (BRACO_MAX_ANGLE + BRACO_MIN_ANGLE) / 2.0f;
+                        const float amplitude = (BRACO_MAX_ANGLE - BRACO_MIN_ANGLE) / 2.0f;
+                        target_angle = center - (local_data.joy_y_norm * amplitude);
+                        
+                        angles[1] = angles[1] * (1.0f - SMOOTHING_ALPHA) + target_angle * SMOOTHING_ALPHA;
                         cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = angles[1] };
                         send_cmd = true;
                     }
                     break;
 
                 case MODE_ANGULO:
-                    // Feedback visual: LED Azul
+                    servo_name = "Angulo";
                     gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 1);
-                    // Controla o Ângulo com o eixo X do joystick
                     if (fabs(local_data.joy_x_norm) > 0.15f) {
-                        float target = 90.0f + (local_data.joy_x_norm * 90.0f);
-                        angles[2] = angles[2] * (1.0f - SMOOTHING_ALPHA) + target * SMOOTHING_ALPHA;
+                        const float center = (ANGULO_MAX_ANGLE + ANGULO_MIN_ANGLE) / 2.0f;
+                        const float amplitude = (ANGULO_MAX_ANGLE - ANGULO_MIN_ANGLE) / 2.0f;
+                        target_angle = center + (local_data.joy_x_norm * amplitude);
+                        
+                        angles[2] = angles[2] * (1.0f - SMOOTHING_ALPHA) + target_angle * SMOOTHING_ALPHA;
                         cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = angles[2] };
                         send_cmd = true;
                     }
                     break;
-                
-                case MODE_IDLE:
-                    // Não faz nada, o LED será controlado pela task de alerta
-                    break;
             }
 
-            // Se um movimento foi calculado, envia o comando para a fila do Servo Manager
             if (send_cmd) {
                 xQueueSend(servo_command_queue, &cmd, 0);
+                printf("COMANDO [%s]: Movendo para %.1f graus\n", servo_name, cmd.angle);
             }
         }
-        
-        // Pausa a tarefa para permitir que outras executem
         vTaskDelay(pdMS_TO_TICKS(25));
     }
 }

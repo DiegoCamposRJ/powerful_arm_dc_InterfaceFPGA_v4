@@ -9,10 +9,23 @@
 
 // --- Pinos ---
 // Por enquanto, só precisamos do pino da base para o teste inicial
-#define SERVO_BASE_PIN      16 // Futuro servo da "Garra"
-#define SERVO_BRACO_PIN     16 // Futuro servo do "Braço" ou "Altura"
-#define SERVO_GARRA_PIN     16 // Futuro servo da "Garra"
-#define SERVO_ANGULO_PIN    16 // <-- ADICIONE O PINO PARA O SERVO DE ÂNGULO
+#define SERVO_BASE_PIN      16 // 17 base
+#define SERVO_BRACO_PIN     16 // 19 braco 
+#define SERVO_GARRA_PIN     16 // 18 garra
+#define SERVO_ANGULO_PIN    16 // 16 angulo 
+
+// --- LIMITES DE MOVIMENTO DOS SERVOS (em graus) ---
+#define BASE_MIN_ANGLE      0.0f
+#define BASE_MAX_ANGLE      180.0f
+
+#define BRACO_MIN_ANGLE     70.0f  // (90 - 40/2)
+#define BRACO_MAX_ANGLE     110.0f // (90 + 40/2) -> Total de 40° de movimento
+
+#define GARRA_MIN_ANGLE     80.0f  // (90 - 25/2)
+#define GARRA_MAX_ANGLE     105.0f // (90 + 25/2) -> Total de 25° de movimento
+
+#define ANGULO_MIN_ANGLE    70.0f  // (90 - 40/2)
+#define ANGULO_MAX_ANGLE    110.0f // (90 + 40/2) -> Total de 40° de movimento
 
 // --- Parâmetros de Funcionamento ---
 #define PWM_FREQ 50

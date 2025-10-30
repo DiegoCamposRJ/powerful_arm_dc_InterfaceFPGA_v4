@@ -171,69 +171,54 @@ void test_sensor_vl53l0x() {
     }
 }
 
-//---------------------------------------------------------------------------------------------//
-// perifericos.c -> Substitua a função test_servos
-//---------------------------------------------------------------------------------------------//
 void test_servos() {
-    printf("  [TESTE] Testando todos os Servos via Fila de Comandos...\n");
-
-    // Declara a variável de comando APENAS UMA VEZ.
+    printf("  [TESTE] Testando todos os Servos com seus limites...\n");
     ServoCommand_t cmd;
 
     // --- Testa a Base ---
-    printf("    - Testando Base...\n");
-    // Atribui um novo valor à variável 'cmd' existente.
-    cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = 0.0f };
+    printf("    - Testando Base (%.0f a %.0f graus)...\n", BASE_MIN_ANGLE, BASE_MAX_ANGLE);
+    cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = BASE_MIN_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
-
-    cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = 180.0f };
+    cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = BASE_MAX_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
-
     cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = 90.0f };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     // --- Testa o Braço ---
-    printf("    - Testando Braco...\n");
-    cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = 0.0f };
+    printf("    - Testando Braco (%.0f a %.0f graus)...\n", BRACO_MIN_ANGLE, BRACO_MAX_ANGLE);
+    cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = BRACO_MIN_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
-
-    cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = 180.0f };
+    cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = BRACO_MAX_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
-
     cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = 90.0f };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     // --- Testa a Garra ---
-    printf("    - Testando Garra...\n");
-    cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = 0.0f };
+    printf("    - Testando Garra (%.0f a %.0f graus)...\n", GARRA_MIN_ANGLE, GARRA_MAX_ANGLE);
+    cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = GARRA_MIN_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
-
-    cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = 180.0f };
+    cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = GARRA_MAX_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
-
     cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = 90.0f };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     // --- Testa o Ângulo ---
-    printf("    - Testando Angulo...\n");
-    // CORREÇÃO: Removemos o "ServoCommand_t" do início da linha.
-    cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = 0.0f };
+    printf("    - Testando Angulo (%.0f a %.0f graus)...\n", ANGULO_MIN_ANGLE, ANGULO_MAX_ANGLE);
+    cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = ANGULO_MIN_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
-
-    cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = 180.0f };
+    cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = ANGULO_MAX_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
-
     cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = 90.0f };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
