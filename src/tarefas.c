@@ -233,13 +233,15 @@ void task_coordenador_controle(void *params) {
 }
 
 // =============================================================================================
-// TAREFA DE CONTROLE DA GARRA (BOTÃO A) - VERSÃO FINAL COM MAPEAMENTO CORRETO
+// TAREFA DE CONTROLE DA GARRA (BOTÃO A) - LÓGICA DE POSIÇÕES PRÉ-DEFINIDAS
 // =============================================================================================
 void task_control_garra(void *params) {
     printf("[TAREFA] Iniciando Controle da Garra (Botao A)...\n");
-    float garra_angle = 90.0f;
-    const float SMOOTHING_ALPHA = 0.1f;
     InputData_t local_data;
+    
+    // Estado para lembrar a última posição do joystick (Cima, Centro, Baixo)
+    typedef enum { POS_UP, POS_CENTER, POS_DOWN } JoystickYState_t;
+    JoystickYState_t last_joy_y_state = POS_CENTER;
 
     while (true) {
         if (xSemaphoreTake(input_mutex, portMAX_DELAY) == pdTRUE) {
@@ -248,25 +250,51 @@ void task_control_garra(void *params) {
         }
 
         if (local_data.btn_a_pressed) {
-            if (fabs(local_data.joy_y_norm) > 0.15f) {
-                // --- LÓGICA DE MAPEAMENTO CORRIGIDA ---
-                const float center_angle = (GARRA_MAX_ANGLE + GARRA_MIN_ANGLE) / 2.0f;
-                const float amplitude = (GARRA_MAX_ANGLE - GARRA_MIN_ANGLE) / 2.0f;
-                float target_angle = center_angle - (local_data.joy_y_norm * amplitude); // Eixo Y invertido
-
-                garra_angle = garra_angle * (1.0f - SMOOTHING_ALPHA) + target_angle * SMOOTHING_ALPHA;
-                
-                ServoCommand_t cmd = { .servo_id = SERVO_GARRA, .angle = garra_angle };
-                xQueueSend(servo_command_queue, &cmd, 0);
-                printf("COMANDO [Garra]: Movendo para %.1f graus\n", garra_angle);
+            JoystickYState_t current_joy_y_state;
+            
+            // Determina o estado atual do joystick
+            if (local_data.joy_y_norm > 0.5f) { // Joystick para cima
+                current_joy_y_state = POS_UP;
+            } else if (local_data.joy_y_norm < -0.5f) { // Joystick para baixo
+                current_joy_y_state = POS_DOWN;
+            } else { // Joystick no centro
+                current_joy_y_state = POS_CENTER;
             }
+
+            // Se o estado mudou, envia um novo comando
+            if (current_joy_y_state != last_joy_y_state) {
+                last_joy_y_state = current_joy_y_state;
+                ServoCommand_t cmd;
+                float target_angle;
+
+                switch (current_joy_y_state) {
+                    case POS_UP: // Joystick para cima -> Abre a garra
+                        target_angle = GARRA_MAX_ANGLE;
+                        printf("COMANDO [Garra]: Abrir (%.1f graus)\n", target_angle);
+                        break;
+                    case POS_DOWN: // Joystick para baixo -> Fecha a garra
+                        target_angle = GARRA_MIN_ANGLE;
+                        printf("COMANDO [Garra]: Fechar (%.1f graus)\n", target_angle);
+                        break;
+                    case POS_CENTER: // Joystick no centro -> Posição neutra
+                        target_angle = (GARRA_MAX_ANGLE + GARRA_MIN_ANGLE) / 2.0f;
+                        printf("COMANDO [Garra]: Centro (%.1f graus)\n", target_angle);
+                        break;
+                }
+                cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = target_angle };
+                xQueueSend(servo_command_queue, &cmd, 0);
+            }
+        } else {
+            // Reseta o estado quando o botão A é solto
+            last_joy_y_state = POS_CENTER;
         }
-        vTaskDelay(pdMS_TO_TICKS(25));
+        
+        vTaskDelay(pdMS_TO_TICKS(50)); // Verifica o estado 20 vezes por segundo
     }
 }
 
 // =============================================================================================
-// TAREFA DE CONTROLE DO BRAÇO (BOTÃO B) - VERSÃO FINAL COM MAPEAMENTO CORRETO
+// TAREFA DE CONTROLE DO BRAÇO (BOTÃO B) - LÓGICA DE POSIÇÕES PRÉ-DEFINIDAS
 // =============================================================================================
 void task_control_braco(void *params) {
     printf("[TAREFA] Iniciando Controle do Braco (Botao B)...\n");
@@ -276,10 +304,14 @@ void task_control_braco(void *params) {
     bool last_btn_b_state = false;
     uint32_t last_debounce_time = 0;
     const uint32_t DEBOUNCE_DELAY = 250;
-
-    float angles[3] = {90.0f, 90.0f, 90.0f};
-    const float SMOOTHING_ALPHA = 0.1f;
     InputData_t local_data;
+
+    // Estados para lembrar a última posição do joystick (Esquerda, Centro, Direita)
+    typedef enum { POS_LEFT, POS_CENTER_X, POS_RIGHT } JoystickXState_t;
+    JoystickXState_t last_joy_x_state = POS_CENTER_X;
+    
+    typedef enum { POS_UP_Y, POS_CENTER_Y, POS_DOWN_Y } JoystickYState_t;
+    JoystickYState_t last_joy_y_state = POS_CENTER_Y;
 
     while (true) {
         if (xSemaphoreTake(input_mutex, portMAX_DELAY) == pdTRUE) {
@@ -288,6 +320,9 @@ void task_control_braco(void *params) {
         }
 
         if (local_data.btn_a_pressed) {
+            // Reseta os estados se o botão A for pressionado
+            last_joy_x_state = POS_CENTER_X;
+            last_joy_y_state = POS_CENTER_Y;
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
@@ -299,6 +334,9 @@ void task_control_braco(void *params) {
             global_control_mode = current_mode;
             const char* modes[] = {"IDLE", "BASE", "BRACO", "ANGULO"};
             printf("MODO (Botao B): %s\n", modes[current_mode]);
+            // Reseta os estados do joystick ao trocar de modo
+            last_joy_x_state = POS_CENTER_X;
+            last_joy_y_state = POS_CENTER_Y;
         }
         last_btn_b_state = local_data.btn_b_pressed;
 
@@ -310,54 +348,58 @@ void task_control_braco(void *params) {
 
             switch (current_mode) {
                 case MODE_BASE:
-                    servo_name = "Base";
-                    gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 0);
-                    if (fabs(local_data.joy_x_norm) > 0.15f) {
-                        const float center = (BASE_MAX_ANGLE + BASE_MIN_ANGLE) / 2.0f;
-                        const float amplitude = (BASE_MAX_ANGLE - BASE_MIN_ANGLE) / 2.0f;
-                        target_angle = center + (local_data.joy_x_norm * amplitude);
-                        
-                        angles[0] = angles[0] * (1.0f - SMOOTHING_ALPHA) + target_angle * SMOOTHING_ALPHA;
-                        cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = angles[0] };
-                        send_cmd = true;
-                    }
-                    break;
+                case MODE_ANGULO: { // Base e Ângulo usam o eixo X
+                    JoystickXState_t current_joy_x_state;
+                    if (local_data.joy_x_norm > 0.5f) current_joy_x_state = POS_RIGHT;
+                    else if (local_data.joy_x_norm < -0.5f) current_joy_x_state = POS_LEFT;
+                    else current_joy_x_state = POS_CENTER_X;
 
-                case MODE_BRACO:
-                    servo_name = "Braco";
-                    gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0);
-                    if (fabs(local_data.joy_y_norm) > 0.15f) {
-                        const float center = (BRACO_MAX_ANGLE + BRACO_MIN_ANGLE) / 2.0f;
-                        const float amplitude = (BRACO_MAX_ANGLE - BRACO_MIN_ANGLE) / 2.0f;
-                        target_angle = center - (local_data.joy_y_norm * amplitude);
-                        
-                        angles[1] = angles[1] * (1.0f - SMOOTHING_ALPHA) + target_angle * SMOOTHING_ALPHA;
-                        cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = angles[1] };
+                    if (current_joy_x_state != last_joy_x_state) {
+                        last_joy_x_state = current_joy_x_state;
                         send_cmd = true;
+                        if (current_mode == MODE_BASE) {
+                            servo_name = "Base";
+                            cmd.servo_id = SERVO_BASE;
+                            if (current_joy_x_state == POS_RIGHT) target_angle = BASE_MAX_ANGLE;
+                            else if (current_joy_x_state == POS_LEFT) target_angle = BASE_MIN_ANGLE;
+                            else target_angle = (BASE_MAX_ANGLE + BASE_MIN_ANGLE) / 2.0f;
+                        } else { // MODE_ANGULO
+                            servo_name = "Angulo";
+                            cmd.servo_id = SERVO_ANGULO;
+                            if (current_joy_x_state == POS_RIGHT) target_angle = ANGULO_MAX_ANGLE;
+                            else if (current_joy_x_state == POS_LEFT) target_angle = ANGULO_MIN_ANGLE;
+                            else target_angle = (ANGULO_MAX_ANGLE + ANGULO_MIN_ANGLE) / 2.0f;
+                        }
+                        cmd.angle = target_angle;
                     }
                     break;
+                }
+                case MODE_BRACO: {
+                    JoystickYState_t current_joy_y_state;
+                    if (local_data.joy_y_norm > 0.5f) current_joy_y_state = POS_UP_Y;
+                    else if (local_data.joy_y_norm < -0.5f) current_joy_y_state = POS_DOWN_Y;
+                    else current_joy_y_state = POS_CENTER_Y;
 
-                case MODE_ANGULO:
-                    servo_name = "Angulo";
-                    gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 1);
-                    if (fabs(local_data.joy_x_norm) > 0.15f) {
-                        const float center = (ANGULO_MAX_ANGLE + ANGULO_MIN_ANGLE) / 2.0f;
-                        const float amplitude = (ANGULO_MAX_ANGLE - ANGULO_MIN_ANGLE) / 2.0f;
-                        target_angle = center + (local_data.joy_x_norm * amplitude);
-                        
-                        angles[2] = angles[2] * (1.0f - SMOOTHING_ALPHA) + target_angle * SMOOTHING_ALPHA;
-                        cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = angles[2] };
+                    if (current_joy_y_state != last_joy_y_state) {
+                        last_joy_y_state = current_joy_y_state;
                         send_cmd = true;
+                        servo_name = "Braco";
+                        cmd.servo_id = SERVO_BRACO;
+                        if (current_joy_y_state == POS_UP_Y) target_angle = BRACO_MAX_ANGLE;
+                        else if (current_joy_y_state == POS_DOWN_Y) target_angle = BRACO_MIN_ANGLE;
+                        else target_angle = (BRACO_MAX_ANGLE + BRACO_MIN_ANGLE) / 2.0f;
+                        cmd.angle = target_angle;
                     }
                     break;
+                }
             }
 
             if (send_cmd) {
                 xQueueSend(servo_command_queue, &cmd, 0);
-                printf("COMANDO [%s]: Movendo para %.1f graus\n", servo_name, cmd.angle);
+                printf("COMANDO [%s]: Mover para posicao %.1f graus\n", servo_name, cmd.angle);
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(25));
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
