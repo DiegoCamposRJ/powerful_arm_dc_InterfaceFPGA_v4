@@ -171,8 +171,13 @@ void test_sensor_vl53l0x() {
     }
 }
 
+//---------------------------------------------------------------------------------------------//
+// Função de Teste para todos os Servos
+//---------------------------------------------------------------------------------------------//
 void test_servos() {
-    printf("  [TESTE] Testando todos os Servos com seus limites...\n");
+    printf("  [TESTE] Testando todos os Servos via Fila de Comandos...\n");
+
+    // Declara a variável de comando uma única vez.
     ServoCommand_t cmd;
 
     // --- Testa a Base ---
@@ -180,9 +185,11 @@ void test_servos() {
     cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = BASE_MIN_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
+
     cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = BASE_MAX_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
+
     cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = 90.0f };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -192,9 +199,11 @@ void test_servos() {
     cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = BRACO_MIN_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
+
     cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = BRACO_MAX_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
+
     cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = 90.0f };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -204,9 +213,11 @@ void test_servos() {
     cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = GARRA_MIN_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
+
     cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = GARRA_MAX_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
+
     cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = 90.0f };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -216,13 +227,16 @@ void test_servos() {
     cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = ANGULO_MIN_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
+
     cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = ANGULO_MAX_ANGLE };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
+
     cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = 90.0f };
     xQueueSend(servo_command_queue, &cmd, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
 
+    // A task_servo_manager irá desligar os servos automaticamente por timeout após o teste.
     printf("  [OK] Servos testados.\n");
 }
 
