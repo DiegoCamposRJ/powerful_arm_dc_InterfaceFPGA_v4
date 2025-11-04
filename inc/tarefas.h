@@ -13,6 +13,7 @@
 typedef struct {
     bool btn_a_pressed;
     bool btn_b_pressed;
+    bool btn_sw_pressed;
     float joy_x_norm; // Joystick X normalizado (-1.0 a 1.0)
     float joy_y_norm; // Joystick Y normalizado (-1.0 a 1.0)
 } InputData_t;
