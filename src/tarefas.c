@@ -233,15 +233,13 @@ void task_coordenador_controle(void *params) {
 }
 
 // =============================================================================================
-// TAREFA DE CONTROLE DA GARRA (BOTÃO A) - LÓGICA DE POSIÇÕES PRÉ-DEFINIDAS
+// TAREFA DE CONTROLE DA GARRA (BOTÃO A) - LÓGICA FINAL PARA SERVO CONTÍNUO
 // =============================================================================================
 void task_control_garra(void *params) {
     printf("[TAREFA] Iniciando Controle da Garra (Botao A)...\n");
     InputData_t local_data;
-    
-    // Estado para lembrar a última posição do joystick (Cima, Centro, Baixo)
-    typedef enum { POS_UP, POS_CENTER, POS_DOWN } JoystickYState_t;
-    JoystickYState_t last_joy_y_state = POS_CENTER;
+    static float current_garra_angle = 90.0f;
+    const float R_SPEED = 2.0f;
 
     while (true) {
         if (xSemaphoreTake(input_mutex, portMAX_DELAY) == pdTRUE) {
@@ -249,84 +247,75 @@ void task_control_garra(void *params) {
             xSemaphoreGive(input_mutex);
         }
 
+        float angle_command = 90.0f; // Comando padrão = PARAR
+
         if (local_data.btn_a_pressed) {
-            JoystickYState_t current_joy_y_state;
-            
-            // Determina o estado atual do joystick
-            if (local_data.joy_y_norm > 0.5f) { // Joystick para cima
-                current_joy_y_state = POS_UP;
-            } else if (local_data.joy_y_norm < -0.5f) { // Joystick para baixo
-                current_joy_y_state = POS_DOWN;
-            } else { // Joystick no centro
-                current_joy_y_state = POS_CENTER;
-            }
-
-            // Se o estado mudou, envia um novo comando
-            if (current_joy_y_state != last_joy_y_state) {
-                last_joy_y_state = current_joy_y_state;
-                ServoCommand_t cmd;
-                float target_angle;
-
-                switch (current_joy_y_state) {
-                    case POS_UP: // Joystick para cima -> Abre a garra
-                        target_angle = GARRA_MAX_ANGLE;
-                        printf("COMANDO [Garra]: Abrir (%.1f graus)\n", target_angle);
-                        break;
-                    case POS_DOWN: // Joystick para baixo -> Fecha a garra
-                        target_angle = GARRA_MIN_ANGLE;
-                        printf("COMANDO [Garra]: Fechar (%.1f graus)\n", target_angle);
-                        break;
-                    case POS_CENTER: // Joystick no centro -> Posição neutra
-                        target_angle = (GARRA_MAX_ANGLE + GARRA_MIN_ANGLE) / 2.0f;
-                        printf("COMANDO [Garra]: Centro (%.1f graus)\n", target_angle);
-                        break;
+            // Determina a intenção de movimento
+            if (local_data.joy_y_norm > 0.5f) { // Joystick para cima -> Abrir (diminuir ângulo)
+                // Só permite o movimento se não tiver atingido o limite
+                if (current_garra_angle > GARRA_MIN_ANGLE) {
+                    current_garra_angle -= R_SPEED;
+                    angle_command = 70.0f; // Comando para girar em um sentido
                 }
-                cmd = (ServoCommand_t){ .servo_id = SERVO_GARRA, .angle = target_angle };
-                xQueueSend(servo_command_queue, &cmd, 0);
+            } else if (local_data.joy_y_norm < -0.5f) { // Joystick para baixo -> Fechar (aumentar ângulo)
+                // Só permite o movimento se não tiver atingido o limite
+                if (current_garra_angle < GARRA_MAX_ANGLE) {
+                    current_garra_angle += R_SPEED;
+                    angle_command = 110.0f; // Comando para girar no outro sentido
+                }
             }
-        } else {
-            // Reseta o estado quando o botão A é solto
-            last_joy_y_state = POS_CENTER;
+            // Se o joystick estiver no centro ou um limite foi atingido, angle_command permanece 90.0f (PARAR)
+
+            // Garante que a posição virtual não ultrapasse os limites
+            if (current_garra_angle < GARRA_MIN_ANGLE) current_garra_angle = GARRA_MIN_ANGLE;
+            if (current_garra_angle > GARRA_MAX_ANGLE) current_garra_angle = GARRA_MAX_ANGLE;
+
+            ServoCommand_t cmd = { .servo_id = SERVO_GARRA, .angle = angle_command };
+            xQueueSend(servo_command_queue, &cmd, 0);
+            printf("COMANDO [Garra]: Posicao Virtual: %.1f graus\n", current_garra_angle);
         }
         
-        vTaskDelay(pdMS_TO_TICKS(50)); // Verifica o estado 20 vezes por segundo
+        vTaskDelay(pdMS_TO_TICKS(25));
     }
 }
 
-// =============================================================================================
-// TAREFA DE CONTROLE DO BRAÇO (BOTÃO B) - LÓGICA DE POSIÇÕES PRÉ-DEFINIDAS
-// =============================================================================================
+//---------------------------------------------------------------------------------------------//
+// TAREFA DE CONTROLE DO BRAÇO (BOTÃO B) - LÓGICA FINAL PARA SERVO DE ROTAÇÃO CONTÍNUA
+//---------------------------------------------------------------------------------------------//
 void task_control_braco(void *params) {
     printf("[TAREFA] Iniciando Controle do Braco (Botao B)...\n");
+    
+    // A máquina de estados para ciclar entre os modos de controle.
     typedef enum { MODE_IDLE, MODE_BASE, MODE_BRACO, MODE_ANGULO } control_mode_t;
     control_mode_t current_mode = MODE_IDLE;
 
+    // Variáveis para a lógica de detecção de clique (toggle) com debounce.
     bool last_btn_b_state = false;
     uint32_t last_debounce_time = 0;
     const uint32_t DEBOUNCE_DELAY = 250;
+    
+    // Struct local para armazenar os dados de entrada.
     InputData_t local_data;
 
-    // Estados para lembrar a última posição do joystick (Esquerda, Centro, Direita)
-    typedef enum { POS_LEFT, POS_CENTER_X, POS_RIGHT } JoystickXState_t;
-    JoystickXState_t last_joy_x_state = POS_CENTER_X;
-    
-    typedef enum { POS_UP_Y, POS_CENTER_Y, POS_DOWN_Y } JoystickYState_t;
-    JoystickYState_t last_joy_y_state = POS_CENTER_Y;
+    // --- Posição Virtual ---
+    // Estas variáveis 'static' "lembram" a posição simulada de cada servo.
+    static float current_angles[3] = {90.0f, 90.0f, 90.0f}; // Base, Braço, Ângulo
+    const float ROTATION_SPEED = 2.0f; // Velocidade de rotação em "graus virtuais" por ciclo.
 
     while (true) {
+        // 1. Obtém a cópia mais recente dos dados de entrada.
         if (xSemaphoreTake(input_mutex, portMAX_DELAY) == pdTRUE) {
             local_data = shared_input_data;
             xSemaphoreGive(input_mutex);
         }
 
+        // 2. Se o Botão A (Garra) estiver ativo, esta tarefa cede a prioridade.
         if (local_data.btn_a_pressed) {
-            // Reseta os estados se o botão A for pressionado
-            last_joy_x_state = POS_CENTER_X;
-            last_joy_y_state = POS_CENTER_Y;
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
 
+        // 3. Lógica de clique do Botão B para alternar os modos.
         uint32_t now = to_ms_since_boot(get_absolute_time());
         if (local_data.btn_b_pressed && !last_btn_b_state && (now - last_debounce_time > DEBOUNCE_DELAY)) {
             last_debounce_time = now;
@@ -334,74 +323,88 @@ void task_control_braco(void *params) {
             global_control_mode = current_mode;
             const char* modes[] = {"IDLE", "BASE", "BRACO", "ANGULO"};
             printf("MODO (Botao B): %s\n", modes[current_mode]);
-            // Reseta os estados do joystick ao trocar de modo
-            last_joy_x_state = POS_CENTER_X;
-            last_joy_y_state = POS_CENTER_Y;
         }
         last_btn_b_state = local_data.btn_b_pressed;
 
+        // 4. Se um modo de controle estiver ativo, executa a lógica de movimento.
         if (current_mode != MODE_IDLE) {
             ServoCommand_t cmd;
-            bool send_cmd = false;
-            float target_angle;
+            float angle_command = 90.0f; // Comando padrão = PARAR (pulso de ~1500µs)
             const char* servo_name = "";
+            int servo_idx = -1;
 
             switch (current_mode) {
                 case MODE_BASE:
-                case MODE_ANGULO: { // Base e Ângulo usam o eixo X
-                    JoystickXState_t current_joy_x_state;
-                    if (local_data.joy_x_norm > 0.5f) current_joy_x_state = POS_RIGHT;
-                    else if (local_data.joy_x_norm < -0.5f) current_joy_x_state = POS_LEFT;
-                    else current_joy_x_state = POS_CENTER_X;
-
-                    if (current_joy_x_state != last_joy_x_state) {
-                        last_joy_x_state = current_joy_x_state;
-                        send_cmd = true;
-                        if (current_mode == MODE_BASE) {
-                            servo_name = "Base";
-                            cmd.servo_id = SERVO_BASE;
-                            if (current_joy_x_state == POS_RIGHT) target_angle = BASE_MAX_ANGLE;
-                            else if (current_joy_x_state == POS_LEFT) target_angle = BASE_MIN_ANGLE;
-                            else target_angle = (BASE_MAX_ANGLE + BASE_MIN_ANGLE) / 2.0f;
-                        } else { // MODE_ANGULO
-                            servo_name = "Angulo";
-                            cmd.servo_id = SERVO_ANGULO;
-                            if (current_joy_x_state == POS_RIGHT) target_angle = ANGULO_MAX_ANGLE;
-                            else if (current_joy_x_state == POS_LEFT) target_angle = ANGULO_MIN_ANGLE;
-                            else target_angle = (ANGULO_MAX_ANGLE + ANGULO_MIN_ANGLE) / 2.0f;
-                        }
-                        cmd.angle = target_angle;
+                    servo_name = "Base";
+                    servo_idx = 0;
+                    gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 0);
+                    
+                    if (local_data.joy_x_norm > 0.5f && current_angles[0] < BASE_MAX_ANGLE) {
+                        current_angles[0] += ROTATION_SPEED;
+                        angle_command = 110.0f; // Comando para girar no sentido horário
+                    } else if (local_data.joy_x_norm < -0.5f && current_angles[0] > BASE_MIN_ANGLE) {
+                        current_angles[0] -= ROTATION_SPEED;
+                        angle_command = 70.0f; // Comando para girar no sentido anti-horário
                     }
+                    
+                    if (current_angles[0] < BASE_MIN_ANGLE) current_angles[0] = BASE_MIN_ANGLE;
+                    if (current_angles[0] > BASE_MAX_ANGLE) current_angles[0] = BASE_MAX_ANGLE;
+                    
+                    cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = angle_command };
                     break;
-                }
-                case MODE_BRACO: {
-                    JoystickYState_t current_joy_y_state;
-                    if (local_data.joy_y_norm > 0.5f) current_joy_y_state = POS_UP_Y;
-                    else if (local_data.joy_y_norm < -0.5f) current_joy_y_state = POS_DOWN_Y;
-                    else current_joy_y_state = POS_CENTER_Y;
 
-                    if (current_joy_y_state != last_joy_y_state) {
-                        last_joy_y_state = current_joy_y_state;
-                        send_cmd = true;
-                        servo_name = "Braco";
-                        cmd.servo_id = SERVO_BRACO;
-                        if (current_joy_y_state == POS_UP_Y) target_angle = BRACO_MAX_ANGLE;
-                        else if (current_joy_y_state == POS_DOWN_Y) target_angle = BRACO_MIN_ANGLE;
-                        else target_angle = (BRACO_MAX_ANGLE + BRACO_MIN_ANGLE) / 2.0f;
-                        cmd.angle = target_angle;
+                case MODE_BRACO:
+                    servo_name = "Braco";
+                    servo_idx = 1;
+                    gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0);
+                    
+                    if (local_data.joy_y_norm > 0.5f && current_angles[1] < BRACO_MAX_ANGLE) {
+                        current_angles[1] += ROTATION_SPEED;
+                        angle_command = 70.0f; // A direção pode precisar ser invertida para 110.0f
+                    } else if (local_data.joy_y_norm < -0.5f && current_angles[1] > BRACO_MIN_ANGLE) {
+                        current_angles[1] -= ROTATION_SPEED;
+                        angle_command = 110.0f;
                     }
+                    
+                    if (current_angles[1] < BRACO_MIN_ANGLE) current_angles[1] = BRACO_MIN_ANGLE;
+                    if (current_angles[1] > BRACO_MAX_ANGLE) current_angles[1] = BRACO_MAX_ANGLE;
+                    
+                    cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = angle_command };
                     break;
-                }
+
+                case MODE_ANGULO:
+                    servo_name = "Angulo";
+                    servo_idx = 2;
+                    gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 1);
+                    
+                    if (local_data.joy_x_norm > 0.5f && current_angles[2] < ANGULO_MAX_ANGLE) {
+                        current_angles[2] += ROTATION_SPEED;
+                        angle_command = 110.0f;
+                    } else if (local_data.joy_x_norm < -0.5f && current_angles[2] > ANGULO_MIN_ANGLE) {
+                        current_angles[2] -= ROTATION_SPEED;
+                        angle_command = 70.0f;
+                    }
+                    
+                    if (current_angles[2] < ANGULO_MIN_ANGLE) current_angles[2] = ANGULO_MIN_ANGLE;
+                    if (current_angles[2] > ANGULO_MAX_ANGLE) current_angles[2] = ANGULO_MAX_ANGLE;
+                    
+                    cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = angle_command };
+                    break;
             }
 
-            if (send_cmd) {
+            // Envia o comando (Girar ou Parar) para o Servo Manager
+            if (servo_idx != -1) {
                 xQueueSend(servo_command_queue, &cmd, 0);
-                printf("COMANDO [%s]: Mover para posicao %.1f graus\n", servo_name, cmd.angle);
+                // O log agora mostra a posição VIRTUAL, que é o que importa
+                printf("COMANDO [%s]: Posicao Virtual: %.1f graus\n", servo_name, current_angles[servo_idx]);
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
+        
+        // Pausa a tarefa para permitir que outras executem
+        vTaskDelay(pdMS_TO_TICKS(25));
     }
 }
+
 
 //---------------------------------------------------------------------------------------------//
 // TAREFA SERVO MANAGER
