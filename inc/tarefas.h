@@ -36,6 +36,7 @@ extern TaskHandle_t handle_coordenador_controle;
 extern TaskHandle_t handle_control_garra;
 extern TaskHandle_t handle_control_braco;
 extern TaskHandle_t handle_servo_manager;
+extern TaskHandle_t handle_fpga_receiver;
 
 // --- Declaração Pública de Variáveis e Primitivas Globais ---
 // Estas variáveis são DEFINIDAS em tarefas.c e declaradas aqui para serem
@@ -44,7 +45,8 @@ extern vl53l0x_dev sensor_dev;
 // extern SemaphoreHandle_t servo_mutex;
 extern SemaphoreHandle_t input_mutex;
 extern QueueHandle_t servo_command_queue; // <-- NOVO: Fila em vez de Mutex
-extern ControlMode_t global_control_mode; // <-- NOVO: Variável para compartilhar o modo do botão B
+extern ControlMode_t global_control_mode; // <-- NOVO: Variável para compartilhar o modo do botão 
+extern SemaphoreHandle_t fpga_sequence_mutex;
 
 // --- Protótipos das Tarefas ---
 void task_self_test(void *params);
@@ -54,5 +56,6 @@ void task_coordenador_controle(void *params);
 void task_control_garra(void *params);
 void task_control_braco(void *params);
 void task_servo_manager(void *params);
+void task_fpga_receiver(void *params);
 
 #endif

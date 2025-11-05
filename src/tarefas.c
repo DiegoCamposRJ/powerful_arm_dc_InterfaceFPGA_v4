@@ -34,6 +34,12 @@ ServoCommand_t recorded_sequence[MAX_RECORDED_STEPS];
 int record_index = 0;
 bool is_recording = false;
 
+// --- VARIÁVEIS PARA RECEBIMENTO E PLAYBACK DA FPGA ---
+#define MAX_FPGA_STEPS 50 // Tamanho do buffer para a sequência vinda da FPGA
+ServoCommand_t playback_sequence_from_fpga[MAX_FPGA_STEPS];
+int fpga_sequence_length = 0;
+// SemaphoreHandle_t fpga_sequence_mutex; // Mutex para proteger o acesso a este buffer
+
 extern ssd1306_t oled;
 vl53l0x_dev sensor_dev;
 uint16_t distancia_global_mm = 0;
@@ -112,34 +118,37 @@ void task_distancia_display(void *params) {
 }
 
 //---------------------------------------------------------------------------------------------//
-// TAREFA DE MONITORAMENTO DE ALERTAS - MODIFICADA PARA ACIONAR PLAYBACK VIA NOTIFICAÇÃO
+// TAREFA DE ALERTA - MODIFICADA PARA PEDIR E EXECUTAR DADOS DA FPGA
 //---------------------------------------------------------------------------------------------//
 void task_alerta_proximidade(void *params) {
+    // Espera o sinal do self_test para começar a operar.
     if (xSemaphoreTake(self_test_sem, portMAX_DELAY) == pdTRUE) {
         printf("[TAREFA] Sinal recebido. Iniciando Alerta/Acao Task...\n");
 
         uint16_t distancia_local;
         InputData_t input_local; // Struct para armazenar o estado dos botões
         enum { NORMAL, ATENCAO, ALERTA_SONORO, ACAO_SERVO } estado_atual = NORMAL;
-        bool acao_ja_executada = false; // Flag para garantir que a notificação seja enviada apenas uma vez
+        bool acao_ja_executada = false; // Flag para garantir que a sequência seja acionada apenas uma vez
 
         while (true) {
-            // Obtém a distância mais recente
+            // 1. Obtém os dados de estado mais recentes de forma segura.
+            // Obtém a distância do sensor.
             if (xSemaphoreTake(sensor_data_mutex, portMAX_DELAY) == pdTRUE) {
                 distancia_local = distancia_global_mm;
                 xSemaphoreGive(sensor_data_mutex);
             }
-            // Obtém o estado mais recente dos botões/joystick
+            // Obtém o estado dos botões/joystick.
             if (xSemaphoreTake(input_mutex, portMAX_DELAY) == pdTRUE) {
                 input_local = shared_input_data;
                 xSemaphoreGive(input_mutex);
             }
 
-            // --- CONDIÇÃO DE GUARDA PARA AÇÃO AUTOMÁTICA ---
-            // Verifica se o controle manual está inativo
+            // 2. CONDIÇÃO DE GUARDA: Verifica se o controle manual está inativo.
             bool controle_manual_inativo = (!input_local.btn_a_pressed && global_control_mode == MODE_IDLE);
 
-            // 1. Condição de Alerta Crítico (sempre ativo, prioridade máxima)
+            // --- INÍCIO DA MÁQUINA DE ESTADOS DE ALERTA ---
+
+            // ESTADO 1: Alerta Crítico (prioridade máxima)
             if (distancia_local < 100) {
                 if (estado_atual != ALERTA_SONORO) {
                     estado_atual = ALERTA_SONORO;
@@ -151,7 +160,7 @@ void task_alerta_proximidade(void *params) {
                 buzzer_set_alarm(false);
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
-            // 2. Condição de Ação (AGORA ACIONA A REPRODUÇÃO VIA NOTIFICAÇÃO)
+            // ESTADO 2: Ação Automática (só executa se o controle manual estiver inativo)
             else if (distancia_local <= 150 && !acao_ja_executada && controle_manual_inativo) {
                 if (estado_atual != ACAO_SERVO) {
                     estado_atual = ACAO_SERVO;
@@ -159,40 +168,51 @@ void task_alerta_proximidade(void *params) {
                     buzzer_set_alarm(false);
                 }
                 
-                // Só notifica se houver uma sequência gravada para reproduzir
-                if (record_index > 0) {
-                    printf("ACAO: Objeto detectado. Solicitando reproducao da sequencia gravada...\n");
-                    
-                    // Envia uma notificação direta para a task_control_braco
-                    xTaskNotifyGive(handle_control_braco);
-                }
+                printf("ACAO: Objeto detectado. Solicitando sequencia da FPGA...\n");
                 
-                acao_ja_executada = true; // Marca que a ação foi solicitada para não repetir
+                // Limpa o buffer de playback antes de pedir uma nova sequência.
+                if (xSemaphoreTake(fpga_sequence_mutex, portMAX_DELAY) == pdTRUE) {
+                    fpga_sequence_length = 0;
+                    xSemaphoreGive(fpga_sequence_mutex);
+                }
+
+                // Envia o comando de LEITURA (0xB0) para a FPGA, pedindo a sequência no endereço 0.
+                uint8_t cmd[2] = {0xB0, 0};
+                uart_write_blocking(UART_ID, cmd, 2);
+
+                // Pausa para dar tempo à FPGA de responder e à task_fpga_receiver de preencher o buffer.
+                vTaskDelay(pdMS_TO_TICKS(500)); 
+
+                // Notifica o Servo Manager para executar a sequência que acabou de ser recebida.
+                printf("... Solicitando execucao da sequencia recebida da FPGA.\n");
+                xTaskNotifyGive(handle_servo_manager);
+                
+                acao_ja_executada = true; // Marca que a ação foi solicitada para não repetir.
             } 
-            // 3. Lógica de Atenção
+            // ESTADO 3: Atenção
             else if (distancia_local < 300) {
                 if (estado_atual != ATENCAO) {
                     estado_atual = ATENCAO;
                     gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0); // Amarelo
                     buzzer_set_alarm(false);
                 }
-                // Rearma a ação automática se o objeto sair da zona de perigo
+                // Rearma a ação automática se o objeto sair da zona de perigo.
                 if (distancia_local > 150) {
                     acao_ja_executada = false;
                 }
                 vTaskDelay(pdMS_TO_TICKS(200));
             } 
-            // 4. Condição Normal
+            // ESTADO 4: Normal
             else {
                 if (estado_atual != NORMAL) {
                     estado_atual = NORMAL;
-                    // Apenas muda o LED se o controle manual estiver inativo
+                    // Só muda o LED para verde se o controle manual não estiver usando o LED.
                     if (controle_manual_inativo) {
                         gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0); // Verde
                     }
                     buzzer_set_alarm(false);
                 }
-                // Rearma a ação automática
+                // Rearma a ação automática.
                 acao_ja_executada = false;
                 vTaskDelay(pdMS_TO_TICKS(500));
             }
@@ -483,32 +503,52 @@ void task_control_braco(void *params) {
 }
 
 //---------------------------------------------------------------------------------------------//
-// TAREFA SERVO MANAGER
+// TAREFA SERVO MANAGER - MODIFICADA PARA EXECUTAR SEQUÊNCIA DA FPGA
 //---------------------------------------------------------------------------------------------//
 void task_servo_manager(void *params) {
     printf("[TAREFA] Iniciando Servo Manager...\n");
     ServoCommand_t received_command;
 
     // --- Máquina de Estados Interna ---
-    // Armazena a última posição comandada para cada um dos 4 servos
+    // Armazena a última posição de comando para cada um dos 4 servos.
     float last_angles[4] = {90.0f, 90.0f, 90.0f, 90.0f}; // Base, Braço, Garra, Ângulo
-    // Armazena o tempo do último comando recebido para cada servo
+    // Armazena o tempo do último comando recebido para cada servo.
     uint32_t last_command_time[4] = {0, 0, 0, 0};
-    // Tempo em milissegundos para desligar um servo que não recebe comandos
+    // Tempo em milissegundos para desligar um servo que não recebe comandos.
     const uint32_t SERVO_TIMEOUT_MS = 500;
 
     while (true) {
-        // 1. Espera por um novo comando na fila.
-        // O timeout de 20ms faz com que o loop execute regularmente para verificar os timeouts dos servos.
-        if (xQueueReceive(servo_command_queue, &received_command, pdMS_TO_TICKS(20)) == pdTRUE) {
-            // --- Se um comando foi recebido ---
+        // --- 1. OUVINTE DE NOTIFICAÇÃO PARA EXECUTAR SEQUÊNCIA DA FPGA ---
+        // Verifica se recebeu uma notificação da task_alerta_proximidade.
+        if (ulTaskNotifyTake(pdTRUE, 0) > 0) {
+            printf("-> Servo Mgr: Notificacao recebida para executar sequencia da FPGA.\n");
+            
+            // Trava o buffer da sequência para lê-lo com segurança.
+            if (xSemaphoreTake(fpga_sequence_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                if (fpga_sequence_length > 0) {
+                    // Itera sobre a sequência que foi recebida e armazenada pela task_fpga_receiver.
+                    for (int i = 0; i < fpga_sequence_length; i++) {
+                        // Envia o comando da sequência para sua própria fila para ser processado.
+                        xQueueSend(servo_command_queue, &playback_sequence_from_fpga[i], 0);
+                        // Pausa entre os passos para dar tempo ao movimento.
+                        vTaskDelay(pdMS_TO_TICKS(500));
+                    }
+                }
+                xSemaphoreGive(fpga_sequence_mutex); // Libera o buffer.
+            }
+        }
+
+        // --- 2. PROCESSAMENTO DA FILA DE COMANDOS (CONTROLE MANUAL E PLAYBACK) ---
+        // Espera por um novo comando na fila por até 100ms.
+        if (xQueueReceive(servo_command_queue, &received_command, pdMS_TO_TICKS(100)) == pdTRUE) {
+            // Se um comando foi recebido (seja do controle manual ou do playback)...
             uint8_t id = received_command.servo_id;
             
-            // Atualiza o estado interno: o novo ângulo e o tempo atual
+            // Atualiza o estado interno: o novo ângulo e o tempo atual.
             last_angles[id] = received_command.angle;
             last_command_time[id] = to_ms_since_boot(get_absolute_time());
 
-            // Envia o comando para o hardware PWM correspondente
+            // Envia o comando para o hardware PWM correspondente.
             switch (id) {
                 case SERVO_BASE:
                     pwm_set_chan_level(slice_base, pwm_gpio_to_channel(SERVO_BASE_PIN), angle_to_duty(last_angles[id]));
@@ -523,24 +563,78 @@ void task_servo_manager(void *params) {
                     pwm_set_chan_level(slice_angulo, pwm_gpio_to_channel(SERVO_ANGULO_PIN), angle_to_duty(last_angles[id]));
                     break;
             }
-        }
-
-        // 2. Lógica de Timeout (executada a cada ~20ms)
-        // Verifica cada servo individualmente para desligá-lo se estiver inativo.
-        uint32_t now = to_ms_since_boot(get_absolute_time());
-        for (uint8_t id = 0; id < 4; id++) {
-            // Se um servo não recebe um comando por mais de SERVO_TIMEOUT_MS...
-            if (last_command_time[id] != 0 && (now - last_command_time[id] > SERVO_TIMEOUT_MS)) {
-                // ...desliga o pulso PWM apenas daquele servo.
-                switch (id) {
-                    case SERVO_BASE:   pwm_set_chan_level(slice_base,   pwm_gpio_to_channel(SERVO_BASE_PIN),   0); break;
-                    case SERVO_BRACO:  pwm_set_chan_level(slice_braco,  pwm_gpio_to_channel(SERVO_BRACO_PIN),  0); break;
-                    case SERVO_GARRA:  pwm_set_chan_level(slice_garra,  pwm_gpio_to_channel(SERVO_GARRA_PIN),  0); break;
-                    case SERVO_ANGULO: pwm_set_chan_level(slice_angulo, pwm_gpio_to_channel(SERVO_ANGULO_PIN), 0); break;
+        } else {
+            // --- 3. LÓGICA DE TIMEOUT (SE A FILA ESTIVER VAZIA) ---
+            // Se nenhum comando foi recebido em 100ms, verifica quais servos estão inativos.
+            uint32_t now = to_ms_since_boot(get_absolute_time());
+            for (uint8_t id = 0; id < 4; id++) {
+                // Se um servo não recebe um comando por mais de SERVO_TIMEOUT_MS...
+                if (last_command_time[id] != 0 && (now - last_command_time[id] > SERVO_TIMEOUT_MS)) {
+                    // ...desliga o pulso PWM apenas daquele servo para economizar energia.
+                    switch (id) {
+                        case SERVO_BASE:   pwm_set_chan_level(slice_base,   pwm_gpio_to_channel(SERVO_BASE_PIN),   0); break;
+                        case SERVO_BRACO:  pwm_set_chan_level(slice_braco,  pwm_gpio_to_channel(SERVO_BRACO_PIN),  0); break;
+                        case SERVO_GARRA:  pwm_set_chan_level(slice_garra,  pwm_gpio_to_channel(SERVO_GARRA_PIN),  0); break;
+                        case SERVO_ANGULO: pwm_set_chan_level(slice_angulo, pwm_gpio_to_channel(SERVO_ANGULO_PIN), 0); break;
+                    }
+                    // Reseta o timer para não tentar desligar repetidamente.
+                    last_command_time[id] = 0;
                 }
-                // Reseta o timer para não tentar desligar repetidamente
-                last_command_time[id] = 0;
             }
         }
+    }
+}
+
+// =============================================================================================
+// TAREFA RECEPTORA DA FPGA - VERSÃO COM DEPURAÇÃO BYTE-A-BYTE
+// =============================================================================================
+void task_fpga_receiver(void *params) {
+    printf("[TAREFA] Iniciando Receptora da FPGA (Modo de Depuracao)...\n");
+    uint8_t rx_buffer[4];
+    int rx_count = 0;
+
+    while (true) {
+        // Verifica se há pelo menos um byte para ler.
+        // uart_is_readable() é a forma mais simples de verificar.
+        if (uart_is_readable(UART_ID)) {
+            
+            // Lê um único byte
+            uint8_t ch = uart_getc(UART_ID);
+
+            // --- FEEDBACK IMEDIATO NO MONITOR SERIAL ---
+            // Imprime cada byte recebido, em hexadecimal.
+            printf("-> FPGA Rx: Recebido byte 0x%02X\n", ch);
+
+            // Armazena no buffer
+            if (rx_count < 4) {
+                rx_buffer[rx_count] = ch;
+                rx_count++;
+            }
+
+            // Se completamos 4 bytes, processa o pacote completo
+            if (rx_count >= 4) {
+                printf("--> PACOTE COMPLETO: [B:0x%02X, R:0x%02X, A:0x%02X, G:0x%02X]\n", 
+                       rx_buffer[0], rx_buffer[1], rx_buffer[2], rx_buffer[3]);
+                
+                // Tenta travar o mutex para atualizar a sequência de playback
+                if (xSemaphoreTake(fpga_sequence_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                    if (fpga_sequence_length < MAX_FPGA_STEPS) {
+                        // Converte os bytes recebidos para comandos de servo
+                        // (Esta lógica pode precisar de ajuste dependendo do que a FPGA envia)
+                        playback_sequence_from_fpga[fpga_sequence_length++] = (ServoCommand_t){SERVO_BASE, (float)rx_buffer[0]};
+                        playback_sequence_from_fpga[fpga_sequence_length++] = (ServoCommand_t){SERVO_BRACO, (float)rx_buffer[1]};
+                        playback_sequence_from_fpga[fpga_sequence_length++] = (ServoCommand_t){SERVO_ANGULO, (float)rx_buffer[2]};
+                        playback_sequence_from_fpga[fpga_sequence_length++] = (ServoCommand_t){SERVO_GARRA, (float)rx_buffer[3]};
+                    }
+                    xSemaphoreGive(fpga_sequence_mutex);
+                }
+                
+                rx_count = 0; // Reseta para o próximo pacote
+            }
+        }
+
+        // Pequena pausa para não sobrecarregar a CPU com polling.
+        // A tarefa cede tempo para outras tarefas executarem.
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
