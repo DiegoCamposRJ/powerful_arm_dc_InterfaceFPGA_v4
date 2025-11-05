@@ -10,6 +10,7 @@ add_executable(projeto_tcc_monitoramento
     # aht10.c
     vl53l0x.c
     braco_config.c
+    fpga_comms.c
 
     numeros_grandes.c
     numeros_medios.c
@@ -38,6 +39,7 @@ target_link_libraries(projeto_tcc_monitoramento
     hardware_adc
     hardware_pwm
     hardware_i2c
+    hardware_uart
 )
 
 pico_add_extra_outputs(projeto_tcc_monitoramento)

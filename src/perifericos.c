@@ -104,6 +104,12 @@ void init_perifericos() {
     pwm_set_chan_level(slice_braco, pwm_gpio_to_channel(SERVO_BRACO_PIN), 0);
     pwm_set_chan_level(slice_garra, pwm_gpio_to_channel(SERVO_GARRA_PIN), 0);
     pwm_set_chan_level(slice_angulo, pwm_gpio_to_channel(SERVO_ANGULO_PIN), 0);
+
+    // --- INICIALIZAÇÃO DA UART PARA FPGA ---
+    uart_init(UART_ID, BAUD_RATE);
+    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+    printf("UART para FPGA configurada (TX=%d, RX=%d).\n", UART_TX_PIN, UART_RX_PIN);
 }
 
 void test_leds_rgb() {

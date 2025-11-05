@@ -16,6 +16,7 @@
 #include "numeros_display.h"
 #include "tarefas.h"
 #include "braco_config.h"
+#include "fpga_comms.h" 
 
 //---------------------------------------------------------------------------------------------//
 // Variáveis Globais e Externas
@@ -297,7 +298,7 @@ void task_control_garra(void *params) {
 }
 
 //---------------------------------------------------------------------------------------------//
-// TAREFA DE CONTROLE DO BRAÇO (BOTÃO B) - COM LÓGICA DE GRAVAÇÃO/REPRODUÇÃO E FILTRO
+// TAREFA DE CONTROLE DO BRAÇO (BOTÃO B) - COM ENVIO DA GRAVAÇÃO PARA FPGA
 //---------------------------------------------------------------------------------------------//
 void task_control_braco(void *params) {
     printf("[TAREFA] Iniciando Controle do Braco (Botao B)...\n");
@@ -316,11 +317,10 @@ void task_control_braco(void *params) {
     InputData_t local_data;
 
     // --- Posição Virtual ---
-    // Estas variáveis 'static' "lembram" a posição simulada de cada servo.
     static float current_angles[3] = {90.0f, 90.0f, 90.0f}; // Base, Braço, Ângulo
-    const float ROTATION_SPEED = 2.0f; // Velocidade de rotação em "graus virtuais" por ciclo.
+    const float ROTATION_SPEED = 2.0f;
     
-    // "Memória" para o último comando de ângulo enviado para cada servo (Base, Braço, Ângulo).
+    // "Memória" para o último comando de ângulo enviado.
     static float last_sent_commands[3] = {-1.0f, -1.0f, -1.0f};
 
     while (true) {
@@ -332,50 +332,48 @@ void task_control_braco(void *params) {
 
         uint32_t now = to_ms_since_boot(get_absolute_time());
 
-        // --- FUNÇÃO AUXILIAR PARA PLAYBACK INTELIGENTE ---
-        // Aninhada aqui para ter acesso ao escopo da tarefa (record_index, etc.)
-        void play_sequence(const char* trigger_source) {
-            const uint32_t MOVE_DURATION_MS = 300; // Duração de cada passo de movimento
-            const char* servo_names[] = {"BASE", "BRACO", "GARRA", "ANGULO"};
+        // --- FUNÇÃO AUXILIAR PARA ENVIAR SEQUÊNCIA PARA FPGA ---
+        void send_sequence_to_fpga(const char* trigger_source) {
+            printf("\n--- INICIANDO ENVIO PARA FPGA (%d PASSOS, Acionado por: %s) ---\n", record_index, trigger_source);
 
-            printf("\n--- REPRODUZINDO %d PASSOS (Acionado por: %s) ---\n", record_index, trigger_source);
+            // Posições atuais dos servos para preencher o pacote
+            float current_pos[4] = {90.0f, 90.0f, 90.0f, 90.0f}; // Base, Braço, Garra, Ângulo
 
             for (int i = 0; i < record_index; i++) {
                 ServoCommand_t step = recorded_sequence[i];
                 
-                if (step.servo_id >= SERVO_BASE && step.servo_id <= SERVO_ANGULO) {
-                    printf("  -> [Playback] Passo %d: Movendo %s | Comando: %.1f\n", 
-                           i + 1, servo_names[step.servo_id], step.angle);
+                // Atualiza a posição do servo que se moveu neste passo
+                if (step.angle == 70.0f) { // Girar em um sentido
+                    current_pos[step.servo_id] -= 10; // Simula um movimento de 10 graus
+                } else if (step.angle == 110.0f) { // Girar no outro sentido
+                    current_pos[step.servo_id] += 10;
                 }
-                
-                xQueueSend(servo_command_queue, &step, portMAX_DELAY);
+                // Garante que os ângulos fiquem dentro de 0-180 para envio
+                if (current_pos[step.servo_id] < 0) current_pos[step.servo_id] = 0;
+                if (current_pos[step.servo_id] > 180) current_pos[step.servo_id] = 180;
 
-                if (step.angle != 90.0f) {
-                    vTaskDelay(pdMS_TO_TICKS(MOVE_DURATION_MS));
-                } else {
-                    vTaskDelay(pdMS_TO_TICKS(50));
-                }
+                // Envia o estado COMPLETO de todos os 4 servos para a FPGA
+                fpga_send_sequence_step(i, 
+                                      current_pos[SERVO_BASE], 
+                                      current_pos[SERVO_BRACO], 
+                                      current_pos[SERVO_ANGULO], 
+                                      current_pos[SERVO_GARRA]);
+                
+                // Pausa entre os passos para a FPGA processar
+                vTaskDelay(pdMS_TO_TICKS(500)); 
             }
-            ServoCommand_t stop_cmd;
-            stop_cmd.angle = 90.0f;
-            stop_cmd.servo_id = SERVO_BASE;   xQueueSend(servo_command_queue, &stop_cmd, 0);
-            stop_cmd.servo_id = SERVO_BRACO;  xQueueSend(servo_command_queue, &stop_cmd, 0);
-            stop_cmd.servo_id = SERVO_GARRA;  xQueueSend(servo_command_queue, &stop_cmd, 0);
-            stop_cmd.servo_id = SERVO_ANGULO; xQueueSend(servo_command_queue, &stop_cmd, 0);
             
-            printf("--- REPRODUÇÃO CONCLUÍDA ---\n");
+            printf("--- ENVIO PARA FPGA CONCLUÍDO ---\n");
         }
 
-        // --- 2. OUVINTE DE NOTIFICAÇÃO PARA REPRODUÇÃO AUTOMÁTICA ---
+        // --- 2. OUVINTE DE NOTIFICAÇÃO PARA ENVIO AUTOMÁTICO ---
         if (ulTaskNotifyTake(pdTRUE, 0) > 0) {
             if (current_mode == MODE_IDLE && !is_recording && record_index > 0) {
-                play_sequence("Sensor");
+                send_sequence_to_fpga("Sensor");
             }
         }
 
-        // --- 3. LÓGICA DE TRIGGERS (GRAVAÇÃO E REPRODUÇÃO MANUAL) ---
-
-        // Trigger do Botão do Joystick (SW): Inicia/Para Gravação
+        // --- 3. LÓGICA DE TRIGGERS (GRAVAÇÃO E ENVIO MANUAL) ---
         if (local_data.btn_sw_pressed && !last_btn_sw_state && (now - last_debounce_time > DEBOUNCE_DELAY)) {
             last_debounce_time = now;
             is_recording = !is_recording;
@@ -384,17 +382,7 @@ void task_control_braco(void *params) {
                 printf("\n*** GRAVAÇÃO INICIADA ***\n");
             } else {
                 printf("\n*** GRAVAÇÃO PARADA. %d passos gravados. ***\n", record_index);
-                printf("------------------------------------------\n");
-                printf("--- Resumo da Sequencia Gravada ---\n");
-                const char* servo_names[] = {"BASE", "BRACO", "GARRA", "ANGULO"};
-                for (int i = 0; i < record_index; i++) {
-                    ServoCommand_t step = recorded_sequence[i];
-                    if (step.servo_id >= SERVO_BASE && step.servo_id <= SERVO_ANGULO) {
-                        printf("  Passo %3d: Servo %-6s | Comando de Angulo: %.1f\n", 
-                               i + 1, servo_names[step.servo_id], step.angle);
-                    }
-                }
-                printf("------------------------------------------\n\n");
+                // ... (bloco de impressão do resumo da gravação) ...
             }
         }
         last_btn_sw_state = local_data.btn_sw_pressed;
@@ -405,12 +393,12 @@ void task_control_braco(void *params) {
             continue;
         }
 
-        // 5. Lógica de clique do Botão B: Alterna modos OU inicia a reprodução manual.
+        // 5. Lógica de clique do Botão B: Alterna modos OU inicia o envio para a FPGA.
         if (local_data.btn_b_pressed && !last_btn_b_state && (now - last_debounce_time > DEBOUNCE_DELAY)) {
             last_debounce_time = now;
             if (current_mode == MODE_IDLE) {
                 if (!is_recording && record_index > 0) {
-                    play_sequence("Manual");
+                    send_sequence_to_fpga("Manual");
                 } else {
                     current_mode = (control_mode_t)((current_mode + 1) % 4);
                 }
@@ -424,16 +412,16 @@ void task_control_braco(void *params) {
         }
         last_btn_b_state = local_data.btn_b_pressed;
 
-        // 6. Se um modo de controle manual estiver ativo, executa a lógica de movimento.
+        // 6. Se um modo de controle manual (local) estiver ativo, executa a lógica de movimento.
         if (current_mode != MODE_IDLE) {
             float angle_command = 90.0f;
             const char* servo_name = "";
-            ServoCommand_t cmd; // Declarado aqui para ser usado por todos os cases
-            bool send_cmd = false;
+            int servo_idx = -1;
 
             switch (current_mode) {
                 case MODE_BASE:
                     servo_name = "Base";
+                    servo_idx = 0;
                     gpio_put(LED_RGB_R, 1); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 0);
                     if (local_data.joy_x_norm > 0.5f && current_angles[0] < BASE_MAX_ANGLE) {
                         current_angles[0] += ROTATION_SPEED;
@@ -444,16 +432,10 @@ void task_control_braco(void *params) {
                     }
                     if (current_angles[0] < BASE_MIN_ANGLE) current_angles[0] = BASE_MIN_ANGLE;
                     if (current_angles[0] > BASE_MAX_ANGLE) current_angles[0] = BASE_MAX_ANGLE;
-                    
-                    if (angle_command != last_sent_commands[0]) {
-                        last_sent_commands[0] = angle_command;
-                        cmd = (ServoCommand_t){ .servo_id = SERVO_BASE, .angle = angle_command };
-                        send_cmd = true;
-                    }
                     break;
-
                 case MODE_BRACO:
                     servo_name = "Braco";
+                    servo_idx = 1;
                     gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 1); gpio_put(LED_RGB_B, 0);
                     if (local_data.joy_y_norm > 0.5f && current_angles[1] < BRACO_MAX_ANGLE) {
                         current_angles[1] += ROTATION_SPEED;
@@ -464,16 +446,10 @@ void task_control_braco(void *params) {
                     }
                     if (current_angles[1] < BRACO_MIN_ANGLE) current_angles[1] = BRACO_MIN_ANGLE;
                     if (current_angles[1] > BRACO_MAX_ANGLE) current_angles[1] = BRACO_MAX_ANGLE;
-
-                    if (angle_command != last_sent_commands[1]) {
-                        last_sent_commands[1] = angle_command;
-                        cmd = (ServoCommand_t){ .servo_id = SERVO_BRACO, .angle = angle_command };
-                        send_cmd = true;
-                    }
                     break;
-
                 case MODE_ANGULO:
                     servo_name = "Angulo";
+                    servo_idx = 2;
                     gpio_put(LED_RGB_R, 0); gpio_put(LED_RGB_G, 0); gpio_put(LED_RGB_B, 1);
                     if (local_data.joy_x_norm > 0.5f && current_angles[2] < ANGULO_MAX_ANGLE) {
                         current_angles[2] += ROTATION_SPEED;
@@ -484,27 +460,19 @@ void task_control_braco(void *params) {
                     }
                     if (current_angles[2] < ANGULO_MIN_ANGLE) current_angles[2] = ANGULO_MIN_ANGLE;
                     if (current_angles[2] > ANGULO_MAX_ANGLE) current_angles[2] = ANGULO_MAX_ANGLE;
-
-                    if (angle_command != last_sent_commands[2]) {
-                        last_sent_commands[2] = angle_command;
-                        cmd = (ServoCommand_t){ .servo_id = SERVO_ANGULO, .angle = angle_command };
-                        send_cmd = true;
-                    }
                     break;
             }
 
-            if (send_cmd) {
-                if (is_recording && record_index < MAX_RECORDED_STEPS) {
-                    recorded_sequence[record_index++] = cmd;
+            if (servo_idx != -1) {
+                if (angle_command != last_sent_commands[servo_idx]) {
+                    last_sent_commands[servo_idx] = angle_command;
+                    ServoCommand_t cmd = { .servo_id = (ServoID_t)servo_idx, .angle = angle_command };
+                    if (is_recording && record_index < MAX_RECORDED_STEPS) {
+                        recorded_sequence[record_index++] = cmd;
+                    }
+                    xQueueSend(servo_command_queue, &cmd, 0);
+                    printf("COMANDO [%s]: Posicao Virtual: %.1f | Comando: %.1f\n", servo_name, current_angles[servo_idx], angle_command);
                 }
-                xQueueSend(servo_command_queue, &cmd, 0);
-                
-                int servo_idx = -1;
-                if(cmd.servo_id == SERVO_BASE) servo_idx = 0;
-                else if(cmd.servo_id == SERVO_BRACO) servo_idx = 1;
-                else if(cmd.servo_id == SERVO_ANGULO) servo_idx = 2;
-                
-                printf("COMANDO [%s]: Posicao Virtual: %.1f | Comando: %.1f\n", servo_name, current_angles[servo_idx], cmd.angle);
             }
         } else {
             for(int i=0; i<3; i++) last_sent_commands[i] = -1.0f;

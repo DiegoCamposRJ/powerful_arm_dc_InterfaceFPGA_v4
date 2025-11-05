@@ -5,10 +5,10 @@
 #include "hardware/pwm.h"
 
 // --- Pinos ---
-#define SERVO_BASE_PIN      17
-#define SERVO_BRACO_PIN     19
-#define SERVO_GARRA_PIN     18
-#define SERVO_ANGULO_PIN    16
+#define SERVO_BASE_PIN      16//17
+#define SERVO_BRACO_PIN     16//19
+#define SERVO_GARRA_PIN     16//18
+#define SERVO_ANGULO_PIN    16//16
 
 // ===================================================================================
 // --- INTERRUPTOR DE CONTROLE DE LIMITES ---

@@ -28,4 +28,10 @@
 #define JOY_X_PIN           27  // ADC1
 #define BTN_SW_PIN          22  // Botão do Joystick (Entrada Digital)
 
+// --- NOVAS DEFINIÇÕES PARA A UART ---
+#define UART_ID         uart1
+#define BAUD_RATE       115200
+#define UART_TX_PIN     8 // Bitdoglab TX -> FPGA RX
+#define UART_RX_PIN     9 // Bitdoglab RX <- FPGA TX
+
 #endif
