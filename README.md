@@ -1,5 +1,5 @@
 # FPGA como Memória de Posições para Braço Robótico (Bitdoglab)
-
+![Montagem](powerful_arm_dc_InterfaceFPGA_v4/blob/main/Schematic1_1-P1_update_v4.png)
 Este projeto demonstra uma arquitetura de sistema embarcado onde uma FPGA Colorlight i9 (Lattice ECP5) atua como uma unidade de co-processamento e memória (BRAM) para um microcontrolador Bitdoglab (Raspberry Pi Pico).  
 O objetivo é permitir que o Bitdoglab (o "cérebro") envie comandos para a FPGA (a "memória rápida") para Salvar ou Reproduzir sequências de movimentos de um braço robótico (coordenadas de 4 servos).  
 A comunicação entre as duas placas é realizada via UART (a 115200 baud) usando um protocolo binário customizado.
@@ -53,25 +53,7 @@ A FPGA busca os dados do Endereço 0 da memória e transmite o pacote de 4 bytes
 
 3. **Código no Bitdoglab**:
    - Implemente o envio de comandos UART conforme o protocolo descrito.
-   - Exemplo básico (em MicroPython ou C++ para RP2040):  
-     ```python
-     import machine
-     import time
-
-     uart = machine.UART(0, baudrate=115200)
-
-     # Salvar posição (exemplo: endereço 0, valores 128 para todos)
-     cmd_save = b'\xA0\x00\x80\x80\x80\x80'
-     uart.write(cmd_save)
-     time.sleep(0.1)
-
-     # Ler posição (exemplo: endereço 0)
-     cmd_read = b'\xB0\x00'
-     uart.write(cmd_read)
-     response = uart.read(4)  # Aguarda 4 bytes
-     print(response)
-     ```
-
+  
 4. **Teste**:
    - Envie comandos via Bitdoglab e observe os LEDs na FPGA.
    - Pressione T3 para reprodução automática da posição 0.
