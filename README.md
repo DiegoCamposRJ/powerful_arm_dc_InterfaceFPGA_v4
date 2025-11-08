@@ -1,5 +1,5 @@
 # FPGA como Memória de Posições para Braço Robótico (Bitdoglab)
-![Montagem](powerful_arm_dc_InterfaceFPGA_v4/blob/main/Schematic1_1-P1_update_v4.png)
+![Montagem](Schematic1_1-P1_update_v4.png)
 Este projeto demonstra uma arquitetura de sistema embarcado onde uma FPGA Colorlight i9 (Lattice ECP5) atua como uma unidade de co-processamento e memória (BRAM) para um microcontrolador Bitdoglab (Raspberry Pi Pico).  
 O objetivo é permitir que o Bitdoglab (o "cérebro") envie comandos para a FPGA (a "memória rápida") para Salvar ou Reproduzir sequências de movimentos de um braço robótico (coordenadas de 4 servos).  
 A comunicação entre as duas placas é realizada via UART (a 115200 baud) usando um protocolo binário customizado.
